@@ -40,7 +40,7 @@ describe("models-config vertex-ai provider", () => {
 
         expect(parsed.providers["vertex-ai"]).toBeDefined();
         expect(parsed.providers["vertex-ai"]?.apiKey).toBe("VERTEX_AI_API_KEY");
-        
+
         const ids = parsed.providers["vertex-ai"]?.models?.map((model) => model.id);
         expect(ids).toContain("gemini-3-flash-preview");
         expect(ids).toContain("gemini-3-pro-preview");
@@ -67,8 +67,9 @@ describe("models-config vertex-ai provider", () => {
           models: {
             providers: {
               "vertex-ai": {
-                baseUrl: "https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models",
-                api: "google-generative-ai",
+                baseUrl:
+                  "https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models",
+                api: "vertex-ai",
                 models: [
                   {
                     id: "gemini-3-flash-preview",
@@ -92,7 +93,7 @@ describe("models-config vertex-ai provider", () => {
         const parsed = JSON.parse(raw) as {
           providers: Record<string, { apiKey?: string; models?: Array<{ id: string }> }>;
         };
-        
+
         expect(parsed.providers["vertex-ai"]?.apiKey).toBe("VERTEX_AI_API_KEY");
         const ids = parsed.providers["vertex-ai"]?.models?.map((model) => model.id);
         expect(ids).toContain("gemini-3-flash-preview");
@@ -120,8 +121,9 @@ describe("models-config vertex-ai provider", () => {
           models: {
             providers: {
               "vertex-ai": {
-                baseUrl: "https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models",
-                api: "google-generative-ai",
+                baseUrl:
+                  "https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models",
+                api: "vertex-ai",
                 models: [
                   {
                     id: "gemini-3-flash", // Should be normalized to gemini-3-flash-preview
@@ -154,7 +156,7 @@ describe("models-config vertex-ai provider", () => {
         const parsed = JSON.parse(raw) as {
           providers: Record<string, { models?: Array<{ id: string }> }>;
         };
-        
+
         const ids = parsed.providers["vertex-ai"]?.models?.map((model) => model.id);
         expect(ids).toContain("gemini-3-flash-preview");
         expect(ids).toContain("gemini-3-pro-preview");
