@@ -264,6 +264,14 @@ export function normalizeProviders(params: {
       normalizedProvider = googleNormalized;
     }
 
+    if (normalizedKey === "vertex-ai") {
+      const vertexAiNormalized = normalizeGoogleProvider(normalizedProvider);
+      if (vertexAiNormalized !== normalizedProvider) {
+        mutated = true;
+      }
+      normalizedProvider = vertexAiNormalized;
+    }
+
     next[key] = normalizedProvider;
   }
 
