@@ -1,5 +1,7 @@
 # Sample Debug Output
 
+> **Note:** This is temporary documentation for the experimental debug logging feature. This file can be removed once the debugging is complete and the feature is finalized.
+
 When `VERTEX_AI_DEBUG_PAYLOAD=1` is set, the Vertex AI provider will output the following:
 
 ## Example 1: Simple User Message

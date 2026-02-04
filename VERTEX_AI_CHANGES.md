@@ -1,5 +1,7 @@
 # Vertex AI Provider Debug Logging and Experimental Toggle
 
+> **Note:** This is temporary documentation for the experimental toggle feature. Once the experiment is complete and the optimal behavior is determined, this file may be removed or moved to the docs/ directory.
+
 ## Summary of Changes
 
 This PR adds experimental debug logging and a toggle to control the role used for tool results in the Vertex AI provider (`src/providers/vertex-ai.ts`).
