@@ -18,6 +18,18 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
 </p>
 
+---
+
+## ⚠️ Fork Notice / 포크 알림
+
+**English:** This is a fork of [OpenClaw](https://github.com/openclaw/openclaw) with **Google Cloud Vertex AI support** for Gemini 3 models. Since this is not published to npm, you must **build from source**. See [Installation (This Fork)](#installation-this-fork) below.
+
+**한국어:** 이 저장소는 **Google Cloud Vertex AI 지원**이 추가된 [OpenClaw](https://github.com/openclaw/openclaw)의 포크입니다. npm에 배포되지 않았으므로 **소스에서 직접 빌드**해야 합니다. 아래 [설치 방법 (이 포크)](#installation-this-fork)을 참고하세요.
+
+**Key Feature:** Access Gemini 3 models (`gemini-3-flash-preview`, `gemini-3-pro-preview`) via Vertex AI API key authentication (no GCP project ID required). See [docs/providers/vertex-ai.md](docs/providers/vertex-ai.md) for details.
+
+---
+
 **OpenClaw** is a _personal AI assistant_ you run on your own devices.
 It answers you on the channels you already use (WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, iMessage, Microsoft Teams, WebChat), plus extension channels like BlueBubbles, Matrix, Zalo, and Zalo Personal. It can speak and listen on macOS/iOS/Android, and can render a live Canvas you control. The Gateway is just the control plane — the product is the assistant.
 
@@ -40,8 +52,98 @@ Model note: while any model is supported, I strongly recommend **Anthropic Pro/M
 
 - Models config + CLI: [Models](https://docs.openclaw.ai/concepts/models)
 - Auth profile rotation (OAuth vs API keys) + fallbacks: [Model failover](https://docs.openclaw.ai/concepts/model-failover)
+- **Vertex AI provider**: [Vertex AI](docs/providers/vertex-ai.md) (added in this fork)
 
-## Install (recommended)
+## Installation (This Fork)
+
+**⚠️ Important:** This fork is not available on npm. You must build from source.
+
+Runtime: **Node ≥22** (preferably Node 22.12.0 or later) and **pnpm**.
+
+### Quick Install
+
+```bash
+# Clone this repository
+git clone https://github.com/smturtle2/openclaw-vertex.git
+cd openclaw-vertex
+
+# Install dependencies
+pnpm install
+
+# Build the project
+pnpm build
+
+# Run onboarding wizard
+pnpm openclaw onboard --install-daemon
+```
+
+### Detailed Build Steps
+
+1. **Install prerequisites:**
+   ```bash
+   # Ensure Node ≥22 is installed
+   node --version  # Should be ≥22.0.0
+   
+   # Install pnpm if not already installed
+   npm install -g pnpm
+   ```
+
+2. **Clone and build:**
+   ```bash
+   git clone https://github.com/smturtle2/openclaw-vertex.git
+   cd openclaw-vertex
+   pnpm install
+   pnpm build
+   ```
+
+3. **Configure Vertex AI (optional):**
+   
+   If you want to use Vertex AI models:
+   ```bash
+   # Set your Vertex AI API key
+   export VERTEX_AI_API_KEY="your-api-key-here"
+   
+   # Run onboarding and select Vertex AI when prompted
+   pnpm openclaw onboard
+   ```
+   
+   See [docs/providers/vertex-ai.md](docs/providers/vertex-ai.md) for full Vertex AI setup.
+
+4. **Install daemon (recommended):**
+   ```bash
+   pnpm openclaw onboard --install-daemon
+   ```
+
+### Development Mode
+
+For development with hot-reload:
+
+```bash
+# Start gateway in watch mode
+pnpm gateway:watch
+
+# In another terminal, run commands
+pnpm openclaw agent --message "Hello"
+```
+
+### Troubleshooting
+
+- **Build errors:** Make sure you have Node ≥22 and pnpm installed
+- **Permission errors:** On Linux, you may need to run `sudo loginctl enable-linger $USER`
+- **Gateway not starting:** Check logs at `/tmp/openclaw/` or run `pnpm openclaw doctor`
+
+### Updating This Fork
+
+```bash
+cd openclaw-vertex
+git pull origin main
+pnpm install
+pnpm build
+```
+
+## Install (Official OpenClaw - npm)
+
+**Note:** The instructions below are for the official OpenClaw release (without Vertex AI). To use this fork with Vertex AI support, see [Installation (This Fork)](#installation-this-fork) above.
 
 Runtime: **Node ≥22**.
 
