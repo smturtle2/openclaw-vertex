@@ -212,11 +212,24 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
         if (block.type === "text") {
           parts.push({ text: block.text });
         } else if (block.type === "toolCall") {
-          // Vertex AI does not accept id field in functionCall
+          // Vertex AI does not accept id field in functionCall at the top level,
+          // so we inject the internal toolCall id into the args with a marker key
+          const argsWithMarker = { ...block.arguments };
+          if (block.id) {
+            argsWithMarker.__openclaw_tool_call_id = block.id;
+            // Debug logging: injecting internal id
+            try {
+              console.log(
+                `[vertex-ai] outgoing toolCall — injecting id: ${block.id} into functionCall.args for ${block.name}`,
+              );
+            } catch (err) {
+              console.warn("[vertex-ai] debug logging failed:", err);
+            }
+          }
           parts.push({
             functionCall: {
               name: block.name,
-              args: block.arguments,
+              args: argsWithMarker,
             },
           });
         }
@@ -310,6 +323,13 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
         throw new Error("Vertex AI requires an API key");
       }
 
+      // Debug logging: streamVertexAI entry point
+      try {
+        console.log(`[vertex-ai] streamVertexAI entered — model: ${model.id}`);
+      } catch (err) {
+        console.warn("[vertex-ai] debug logging failed:", err);
+      }
+
       // Build the request body
       const requestBody: GoogleRequest = {
         contents: convertMessagesToGoogleFormat(context),
@@ -356,23 +376,21 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
         model.baseUrl || "https://aiplatform.googleapis.com/v1/publishers/google/models";
       const endpoint = `${baseUrl}/${model.id}:streamGenerateContent?key=${apiKey}&alt=sse`;
 
-      // Debug logging (opt-in via environment variable)
-      if (process.env.VERTEX_AI_DEBUG_PAYLOAD === "1") {
-        try {
-          // Log context.messages summary
-          const messagesSummary = context.messages.map((msg) => ({
-            role: msg.role,
-            preview: getContentPreview(msg.content),
-          }));
-          console.log("[vertex-ai] context.messages summary:", JSON.stringify(messagesSummary, null, 2));
+      // Debug logging (always enabled)
+      try {
+        // Log context.messages summary
+        const messagesSummary = context.messages.map((msg) => ({
+          role: msg.role,
+          preview: getContentPreview(msg.content),
+        }));
+        console.log("[vertex-ai] context.messages summary:", JSON.stringify(messagesSummary, null, 2));
 
-          // Log request body with secrets redacted
-          const redactedBody = redactedClone(requestBody);
-          console.log("[vertex-ai] redacted requestBody:", JSON.stringify(redactedBody, null, 2));
-        } catch (err) {
-          // Avoid interfering with runtime if logging fails
-          console.warn("[vertex-ai] debug logging failed:", err);
-        }
+        // Log request body with secrets redacted
+        const redactedBody = redactedClone(requestBody);
+        console.log("[vertex-ai] redacted requestBody:", JSON.stringify(redactedBody, null, 2));
+      } catch (err) {
+        // Avoid interfering with runtime if logging fails
+        console.warn("[vertex-ai] debug logging failed:", err);
       }
 
       // Call onPayload if provided
@@ -484,14 +502,33 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
                     currentBlock = null;
                   }
 
+                  // Prefer the echoed internal id from args, fall back to server id, or synthesize
+                  const args = part.functionCall.args ?? {};
+                  const echoedId = args.__openclaw_tool_call_id as string | undefined;
+                  const serverId = part.functionCall.id;
                   const toolCallId =
-                    part.functionCall.id ||
+                    echoedId ||
+                    serverId ||
                     `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`;
+
+                  // Debug logging: tool call id resolution
+                  try {
+                    console.log(
+                      `[vertex-ai] functionCall received — name: ${part.functionCall.name}, echoedId: ${echoedId || "(none)"}, serverId: ${serverId || "(none)"}, resolved: ${toolCallId}`,
+                    );
+                  } catch (err) {
+                    console.warn("[vertex-ai] debug logging failed:", err);
+                  }
+
+                  // Remove the internal marker from arguments before creating the toolCall
+                  const cleanArgs = { ...args };
+                  delete cleanArgs.__openclaw_tool_call_id;
+
                   const toolCall: ToolCall = {
                     type: "toolCall",
                     id: toolCallId,
                     name: part.functionCall.name,
-                    arguments: part.functionCall.args ?? {},
+                    arguments: cleanArgs,
                   };
                   output.content.push(toolCall);
                   stream.push({
