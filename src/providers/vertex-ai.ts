@@ -280,8 +280,9 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       }
 
       // Build the URL with API key as query parameter
-      const baseUrl = model.baseUrl || "https://generativelanguage.googleapis.com/v1beta";
-      const endpoint = `${baseUrl}/models/${model.id}:streamGenerateContent?key=${apiKey}&alt=sse`;
+      const baseUrl =
+        model.baseUrl || "https://aiplatform.googleapis.com/v1/publishers/google/models";
+      const endpoint = `${baseUrl}/${model.id}:streamGenerateContent?key=${apiKey}&alt=sse`;
 
       // Call onPayload if provided
       options?.onPayload?.(requestBody);
