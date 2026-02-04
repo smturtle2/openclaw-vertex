@@ -8,7 +8,7 @@
  * - Endpoint format: https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:streamGenerateContent?key={apiKey}&alt=sse
  * - Does not accept `id` field in functionCall requests (though it may return ids in responses)
  * - Only accepts `role: "user"` or `role: "model"` in contents (no `role: "function"`)
- * - Tool results (functionResponse) must use `role: "model"` to be visible to the model
+ * - Tool results (functionResponse) must use `role: "user"` to work correctly with continuous tool execution
  */
 
 import type {
@@ -121,7 +121,7 @@ interface GoogleRequest {
 }
 
 // Experimental toggle: when true, toolResult uses role "model"; when false, uses role "user"
-const FORCE_TOOLRESULT_AS_MODEL = true;
+const FORCE_TOOLRESULT_AS_MODEL = false;
 
 let toolCallCounter = 0;
 
