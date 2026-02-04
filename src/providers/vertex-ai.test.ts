@@ -118,3 +118,134 @@ describe("vertex-ai URL construction", () => {
     expect(capturedEndpoint).toContain("?key=test-key");
   });
 });
+
+describe("vertex-ai request body format", () => {
+  it("formats systemInstruction correctly as object with parts array", async () => {
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [{ role: "user", content: "test" }],
+      systemPrompt: "You are a helpful assistant",
+    };
+
+    let capturedBody: unknown = null;
+
+    // Mock fetch to capture the request body
+    global.fetch = vi.fn(async (_url, options) => {
+      if (options?.body) {
+        capturedBody = JSON.parse(options.body.toString());
+      }
+      return new Response(null, { status: 400 });
+    }) as typeof fetch;
+
+    try {
+      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      for await (const _event of stream) {
+        // Just consume events until error
+      }
+    } catch {
+      // Expected to fail
+    }
+
+    // Verify systemInstruction format
+    expect(capturedBody).toBeDefined();
+    expect(capturedBody).toHaveProperty("systemInstruction");
+    expect((capturedBody as any).systemInstruction).toEqual({
+      parts: [{ text: "You are a helpful assistant" }],
+    });
+  });
+
+  it("formats contents correctly with role and parts", async () => {
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: [{ type: "text", text: "hi there" }] },
+        { role: "user", content: "how are you?" },
+      ],
+    };
+
+    let capturedBody: unknown = null;
+
+    global.fetch = vi.fn(async (_url, options) => {
+      if (options?.body) {
+        capturedBody = JSON.parse(options.body.toString());
+      }
+      return new Response(null, { status: 400 });
+    }) as typeof fetch;
+
+    try {
+      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      for await (const _event of stream) {
+        // Just consume events until error
+      }
+    } catch {
+      // Expected to fail
+    }
+
+    // Verify contents format
+    expect(capturedBody).toBeDefined();
+    expect((capturedBody as any).contents).toEqual([
+      { role: "user", parts: [{ text: "hello" }] },
+      { role: "model", parts: [{ text: "hi there" }] },
+      { role: "user", parts: [{ text: "how are you?" }] },
+    ]);
+  });
+
+  it("formats tools correctly with functionDeclarations", async () => {
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [{ role: "user", content: "test" }],
+      tools: [
+        {
+          name: "get_weather",
+          description: "Get weather information",
+          parameters: {
+            type: "object",
+            properties: {
+              location: { type: "string" },
+            },
+            required: ["location"],
+          },
+        },
+      ],
+    };
+
+    let capturedBody: unknown = null;
+
+    global.fetch = vi.fn(async (_url, options) => {
+      if (options?.body) {
+        capturedBody = JSON.parse(options.body.toString());
+      }
+      return new Response(null, { status: 400 });
+    }) as typeof fetch;
+
+    try {
+      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      for await (const _event of stream) {
+        // Just consume events until error
+      }
+    } catch {
+      // Expected to fail
+    }
+
+    // Verify tools format
+    expect(capturedBody).toBeDefined();
+    expect((capturedBody as any).tools).toEqual([
+      {
+        functionDeclarations: [
+          {
+            name: "get_weather",
+            description: "Get weather information",
+            parameters: {
+              type: "object",
+              properties: {
+                location: { type: "string" },
+              },
+              required: ["location"],
+            },
+          },
+        ],
+      },
+    ]);
+  });
+});
