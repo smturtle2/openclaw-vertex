@@ -539,3 +539,46 @@ export function applyAuthProfileConfig(
     },
   };
 }
+
+export const VERTEX_AI_DEFAULT_MODEL_REF = "vertex-ai/gemini-3-flash-preview";
+
+export function applyVertexAiProviderConfig(cfg: OpenClawConfig): OpenClawConfig {
+  const models = { ...cfg.agents?.defaults?.models };
+  models[VERTEX_AI_DEFAULT_MODEL_REF] = {
+    ...models[VERTEX_AI_DEFAULT_MODEL_REF],
+    alias: models[VERTEX_AI_DEFAULT_MODEL_REF]?.alias ?? "Vertex AI",
+  };
+
+  return {
+    ...cfg,
+    agents: {
+      ...cfg.agents,
+      defaults: {
+        ...cfg.agents?.defaults,
+        models,
+      },
+    },
+  };
+}
+
+export function applyVertexAiConfig(cfg: OpenClawConfig): OpenClawConfig {
+  const next = applyVertexAiProviderConfig(cfg);
+  const existingModel = next.agents?.defaults?.model;
+  return {
+    ...next,
+    agents: {
+      ...next.agents,
+      defaults: {
+        ...next.agents?.defaults,
+        model: {
+          ...(existingModel && "fallbacks" in (existingModel as Record<string, unknown>)
+            ? {
+                fallbacks: (existingModel as { fallbacks?: string[] }).fallbacks,
+              }
+            : undefined),
+          primary: VERTEX_AI_DEFAULT_MODEL_REF,
+        },
+      },
+    },
+  };
+}

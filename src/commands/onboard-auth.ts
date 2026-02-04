@@ -19,9 +19,12 @@ export {
   applyVeniceProviderConfig,
   applyVercelAiGatewayConfig,
   applyVercelAiGatewayProviderConfig,
+  applyVertexAiConfig,
+  applyVertexAiProviderConfig,
   applyXiaomiConfig,
   applyXiaomiProviderConfig,
   applyZaiConfig,
+  VERTEX_AI_DEFAULT_MODEL_REF,
 } from "./onboard-auth.config-core.js";
 export {
   applyMinimaxApiConfig,
@@ -48,6 +51,7 @@ export {
   setSyntheticApiKey,
   setVeniceApiKey,
   setVercelAiGatewayApiKey,
+  setVertexAiApiKey,
   setXiaomiApiKey,
   setZaiApiKey,
   writeOAuthCredentials,

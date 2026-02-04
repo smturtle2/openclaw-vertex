@@ -29,6 +29,8 @@ import {
   applyVeniceProviderConfig,
   applyVercelAiGatewayConfig,
   applyVercelAiGatewayProviderConfig,
+  applyVertexAiConfig,
+  applyVertexAiProviderConfig,
   applyXiaomiConfig,
   applyXiaomiProviderConfig,
   applyZaiConfig,
@@ -38,6 +40,7 @@ import {
   SYNTHETIC_DEFAULT_MODEL_REF,
   VENICE_DEFAULT_MODEL_REF,
   VERCEL_AI_GATEWAY_DEFAULT_MODEL_REF,
+  VERTEX_AI_DEFAULT_MODEL_REF,
   XIAOMI_DEFAULT_MODEL_REF,
   setGeminiApiKey,
   setKimiCodingApiKey,
@@ -47,6 +50,7 @@ import {
   setSyntheticApiKey,
   setVeniceApiKey,
   setVercelAiGatewayApiKey,
+  setVertexAiApiKey,
   setXiaomiApiKey,
   setZaiApiKey,
   ZAI_DEFAULT_MODEL_REF,
@@ -98,6 +102,8 @@ export async function applyAuthChoiceApiProviders(
       authChoice = "venice-api-key";
     } else if (params.opts.tokenProvider === "opencode") {
       authChoice = "opencode-zen";
+    } else if (params.opts.tokenProvider === "vertex-ai") {
+      authChoice = "vertex-ai-api-key";
     }
   }
 
@@ -683,6 +689,54 @@ export async function applyAuthChoiceApiProviders(
         applyDefaultConfig: applyOpencodeZenConfig,
         applyProviderConfig: applyOpencodeZenProviderConfig,
         noteDefault: OPENCODE_ZEN_DEFAULT_MODEL,
+        noteAgentModel,
+        prompter: params.prompter,
+      });
+      nextConfig = applied.config;
+      agentModelOverride = applied.agentModelOverride ?? agentModelOverride;
+    }
+    return { config: nextConfig, agentModelOverride };
+  }
+
+  if (authChoice === "vertex-ai-api-key") {
+    let hasCredential = false;
+
+    if (!hasCredential && params.opts?.token && params.opts?.tokenProvider === "vertex-ai") {
+      await setVertexAiApiKey(normalizeApiKeyInput(params.opts.token), params.agentDir);
+      hasCredential = true;
+    }
+
+    const envKey = resolveEnvApiKey("vertex-ai");
+    if (envKey) {
+      const useExisting = await params.prompter.confirm({
+        message: `Use existing VERTEX_AI_API_KEY (${envKey.source}, ${formatApiKeyPreview(envKey.apiKey)})?`,
+        initialValue: true,
+      });
+      if (useExisting) {
+        await setVertexAiApiKey(envKey.apiKey, params.agentDir);
+        hasCredential = true;
+      }
+    }
+    if (!hasCredential) {
+      const key = await params.prompter.text({
+        message: "Enter Vertex AI API key",
+        validate: validateApiKeyInput,
+      });
+      await setVertexAiApiKey(normalizeApiKeyInput(String(key)), params.agentDir);
+    }
+    nextConfig = applyAuthProfileConfig(nextConfig, {
+      profileId: "vertex-ai:default",
+      provider: "vertex-ai",
+      mode: "api_key",
+    });
+    {
+      const applied = await applyDefaultModelChoice({
+        config: nextConfig,
+        setDefaultModel: params.setDefaultModel,
+        defaultModel: VERTEX_AI_DEFAULT_MODEL_REF,
+        applyDefaultConfig: applyVertexAiConfig,
+        applyProviderConfig: applyVertexAiProviderConfig,
+        noteDefault: VERTEX_AI_DEFAULT_MODEL_REF,
         noteAgentModel,
         prompter: params.prompter,
       });
