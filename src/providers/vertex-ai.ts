@@ -214,24 +214,22 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
         } else if (block.type === "toolCall") {
           // Vertex AI does not accept id field in functionCall at the top level,
           // so we inject the internal toolCall id into the args with a marker key
-          const args = { ...block.arguments };
+          const argsWithMarker = { ...block.arguments };
           if (block.id) {
-            args.__openclaw_tool_call_id = block.id;
+            argsWithMarker.__openclaw_tool_call_id = block.id;
             // Debug logging: injecting internal id
-            if (process.env.VERTEX_AI_DEBUG_PAYLOAD === "1") {
-              try {
-                console.log(
-                  `[vertex-ai] outgoing toolCall — injecting id: ${block.id} into functionCall.args for ${block.name}`,
-                );
-              } catch (err) {
-                console.warn("[vertex-ai] debug logging failed:", err);
-              }
+            try {
+              console.log(
+                `[vertex-ai] outgoing toolCall — injecting id: ${block.id} into functionCall.args for ${block.name}`,
+              );
+            } catch (err) {
+              console.warn("[vertex-ai] debug logging failed:", err);
             }
           }
           parts.push({
             functionCall: {
               name: block.name,
-              args,
+              args: argsWithMarker,
             },
           });
         }
@@ -326,12 +324,10 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       }
 
       // Debug logging: streamVertexAI entry point
-      if (process.env.VERTEX_AI_DEBUG_PAYLOAD === "1") {
-        try {
-          console.log(`[vertex-ai] streamVertexAI entered — model: ${model.id}`);
-        } catch (err) {
-          console.warn("[vertex-ai] debug logging failed:", err);
-        }
+      try {
+        console.log(`[vertex-ai] streamVertexAI entered — model: ${model.id}`);
+      } catch (err) {
+        console.warn("[vertex-ai] debug logging failed:", err);
       }
 
       // Build the request body
@@ -380,23 +376,21 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
         model.baseUrl || "https://aiplatform.googleapis.com/v1/publishers/google/models";
       const endpoint = `${baseUrl}/${model.id}:streamGenerateContent?key=${apiKey}&alt=sse`;
 
-      // Debug logging (opt-in via environment variable)
-      if (process.env.VERTEX_AI_DEBUG_PAYLOAD === "1") {
-        try {
-          // Log context.messages summary
-          const messagesSummary = context.messages.map((msg) => ({
-            role: msg.role,
-            preview: getContentPreview(msg.content),
-          }));
-          console.log("[vertex-ai] context.messages summary:", JSON.stringify(messagesSummary, null, 2));
+      // Debug logging (always enabled)
+      try {
+        // Log context.messages summary
+        const messagesSummary = context.messages.map((msg) => ({
+          role: msg.role,
+          preview: getContentPreview(msg.content),
+        }));
+        console.log("[vertex-ai] context.messages summary:", JSON.stringify(messagesSummary, null, 2));
 
-          // Log request body with secrets redacted
-          const redactedBody = redactedClone(requestBody);
-          console.log("[vertex-ai] redacted requestBody:", JSON.stringify(redactedBody, null, 2));
-        } catch (err) {
-          // Avoid interfering with runtime if logging fails
-          console.warn("[vertex-ai] debug logging failed:", err);
-        }
+        // Log request body with secrets redacted
+        const redactedBody = redactedClone(requestBody);
+        console.log("[vertex-ai] redacted requestBody:", JSON.stringify(redactedBody, null, 2));
+      } catch (err) {
+        // Avoid interfering with runtime if logging fails
+        console.warn("[vertex-ai] debug logging failed:", err);
       }
 
       // Call onPayload if provided
@@ -518,14 +512,12 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
                     `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`;
 
                   // Debug logging: tool call id resolution
-                  if (process.env.VERTEX_AI_DEBUG_PAYLOAD === "1") {
-                    try {
-                      console.log(
-                        `[vertex-ai] functionCall received — name: ${part.functionCall.name}, echoedId: ${echoedId || "(none)"}, serverId: ${serverId || "(none)"}, resolved: ${toolCallId}`,
-                      );
-                    } catch (err) {
-                      console.warn("[vertex-ai] debug logging failed:", err);
-                    }
+                  try {
+                    console.log(
+                      `[vertex-ai] functionCall received — name: ${part.functionCall.name}, echoedId: ${echoedId || "(none)"}, serverId: ${serverId || "(none)"}, resolved: ${toolCallId}`,
+                    );
+                  } catch (err) {
+                    console.warn("[vertex-ai] debug logging failed:", err);
                   }
 
                   // Remove the internal marker from arguments before creating the toolCall

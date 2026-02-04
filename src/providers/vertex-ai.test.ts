@@ -374,18 +374,14 @@ describe("vertex-ai request body format", () => {
 });
 
 describe("vertex-ai debug logging", () => {
-  const originalEnv = process.env.VERTEX_AI_DEBUG_PAYLOAD;
   const originalLog = console.log;
 
   afterEach(() => {
-    // Restore original environment and console.log
-    process.env.VERTEX_AI_DEBUG_PAYLOAD = originalEnv;
+    // Restore original console.log
     console.log = originalLog;
   });
 
-  it("does not log when VERTEX_AI_DEBUG_PAYLOAD is not set", async () => {
-    delete process.env.VERTEX_AI_DEBUG_PAYLOAD;
-
+  it("always logs debug information", async () => {
     const model = makeVertexAIModel("gemini-3-flash-preview");
     const context: Context = {
       messages: [{ role: "user", content: "test message" }],
@@ -409,40 +405,11 @@ describe("vertex-ai debug logging", () => {
       // Expected to fail
     }
 
-    expect(logCalls).toHaveLength(0);
+    // Should have log calls since logging is always enabled
+    expect(logCalls.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("does not log when VERTEX_AI_DEBUG_PAYLOAD is set to '0'", async () => {
-    process.env.VERTEX_AI_DEBUG_PAYLOAD = "0";
-
-    const model = makeVertexAIModel("gemini-3-flash-preview");
-    const context: Context = {
-      messages: [{ role: "user", content: "test message" }],
-    };
-
-    const logCalls: unknown[] = [];
-    console.log = vi.fn((...args: unknown[]) => {
-      logCalls.push(args);
-    });
-
-    global.fetch = vi.fn(async () => {
-      return new Response(null, { status: 400 });
-    }) as typeof fetch;
-
-    try {
-      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
-      for await (const _event of stream) {
-        // Consume stream
-      }
-    } catch {
-      // Expected to fail
-    }
-
-    expect(logCalls).toHaveLength(0);
-  });
-
-  it("logs context.messages summary and requestBody when VERTEX_AI_DEBUG_PAYLOAD is '1'", async () => {
-    process.env.VERTEX_AI_DEBUG_PAYLOAD = "1";
+  it("logs context.messages summary and requestBody", async () => {
 
     const model = makeVertexAIModel("gemini-3-flash-preview");
     const context: Context = {
@@ -503,8 +470,6 @@ describe("vertex-ai debug logging", () => {
   });
 
   it("truncates long message content to 120 characters in summary", async () => {
-    process.env.VERTEX_AI_DEBUG_PAYLOAD = "1";
-
     const longMessage = "a".repeat(200);
     const model = makeVertexAIModel("gemini-3-flash-preview");
     const context: Context = {
@@ -543,7 +508,6 @@ describe("vertex-ai debug logging", () => {
   });
 
   it("includes functionCall and functionResponse in logged requestBody", async () => {
-    process.env.VERTEX_AI_DEBUG_PAYLOAD = "1";
 
     const model = makeVertexAIModel("gemini-3-flash-preview");
     const context: Context = {
