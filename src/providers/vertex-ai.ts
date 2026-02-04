@@ -86,7 +86,7 @@ interface GoogleResponse {
 
 interface GoogleRequest {
   contents: GoogleContent[];
-  systemInstruction?: string | { parts: GooglePart[] };
+  systemInstruction?: { parts: GooglePart[] };
   generationConfig?: {
     temperature?: number;
     maxOutputTokens?: number;
@@ -247,7 +247,9 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
 
       // Add system instruction if present
       if (context.systemPrompt) {
-        requestBody.systemInstruction = context.systemPrompt;
+        requestBody.systemInstruction = {
+          parts: [{ text: context.systemPrompt }],
+        };
       }
 
       // Add generation config
