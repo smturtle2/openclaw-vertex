@@ -51,6 +51,7 @@ export {
   setSyntheticApiKey,
   setVeniceApiKey,
   setVercelAiGatewayApiKey,
+  setVertexAiApiKey,
   setXiaomiApiKey,
   setZaiApiKey,
   writeOAuthCredentials,
