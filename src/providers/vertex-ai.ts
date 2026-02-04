@@ -125,63 +125,6 @@ const FORCE_TOOLRESULT_AS_MODEL = false;
 
 let toolCallCounter = 0;
 
-/**
- * Redacts sensitive information from an object for safe logging.
- * Creates a deep clone and replaces sensitive keys with "[REDACTED]".
- */
-function redactSecrets(obj: unknown): unknown {
-  if (obj === null || obj === undefined) {
-    return obj;
-  }
-
-  if (typeof obj !== "object") {
-    return obj;
-  }
-
-  if (Array.isArray(obj)) {
-    return obj.map((item) => redactSecrets(item));
-  }
-
-  const result: Record<string, unknown> = {};
-  const sensitiveKeys = ["key", "apiKey", "api_key", "token", "secret", "password"];
-
-  for (const [key, value] of Object.entries(obj)) {
-    const lowerKey = key.toLowerCase();
-    if (sensitiveKeys.some((sensitive) => lowerKey.includes(sensitive))) {
-      result[key] = "[REDACTED]";
-    } else {
-      result[key] = redactSecrets(value);
-    }
-  }
-
-  return result;
-}
-
-/**
- * Creates a redacted clone of an object for safe logging.
- * Wrapper around redactSecrets for convenience.
- */
-function redactedClone(obj: unknown): unknown {
-  return redactSecrets(obj);
-}
-
-/**
- * Creates a preview string from message content, truncated to maxLength.
- */
-function getContentPreview(content: string | Array<{ type: string; text?: string }>, maxLength = 120): string {
-  if (typeof content === "string") {
-    return content.length > maxLength ? content.slice(0, maxLength) + "..." : content;
-  }
-
-  // For structured content, concatenate text parts
-  const textParts = content
-    .filter((block) => block.type === "text" && block.text)
-    .map((block) => block.text)
-    .join(" ");
-
-  return textParts.length > maxLength ? textParts.slice(0, maxLength) + "..." : textParts;
-}
-
 function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
   const contents: GoogleContent[] = [];
 
@@ -376,18 +319,11 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
         model.baseUrl || "https://aiplatform.googleapis.com/v1/publishers/google/models";
       const endpoint = `${baseUrl}/${model.id}:streamGenerateContent?key=${apiKey}&alt=sse`;
 
-      // Debug logging (always enabled)
+      // Debug logging: concise request summary
       try {
-        // Log context.messages summary
-        const messagesSummary = context.messages.map((msg) => ({
-          role: msg.role,
-          preview: getContentPreview(msg.content),
-        }));
-        console.log("[vertex-ai] context.messages summary:", JSON.stringify(messagesSummary, null, 2));
-
-        // Log request body with secrets redacted
-        const redactedBody = redactedClone(requestBody);
-        console.log("[vertex-ai] redacted requestBody:", JSON.stringify(redactedBody, null, 2));
+        console.log(
+          `[vertex-ai] Request: ${context.messages.length} messages, ${context.tools?.length || 0} tools`,
+        );
       } catch (err) {
         // Avoid interfering with runtime if logging fails
         console.warn("[vertex-ai] debug logging failed:", err);
@@ -409,8 +345,12 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
         body: JSON.stringify(requestBody),
       });
 
+      // Debug logging: HTTP response status
+      console.log(`[vertex-ai] Response status: ${response.status}`);
+
       if (!response.ok) {
         const errorText = await response.text();
+        console.error(`[vertex-ai] API error: ${response.status} ${errorText}`);
         throw new Error(`Vertex AI request failed: ${response.status} ${errorText}`);
       }
 
@@ -419,6 +359,9 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       }
 
       stream.push({ type: "start", partial: output });
+
+      // Debug logging: SSE stream start
+      console.log("[vertex-ai] Starting SSE stream parsing...");
 
       // Parse the SSE stream
       const reader = response.body.getReader();
@@ -443,15 +386,18 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
 
           try {
             const chunk: GoogleResponse = JSON.parse(data);
-            
+
             // Log each SSE chunk received
             console.log("[vertex-ai] SSE chunk received:", JSON.stringify(chunk, null, 2));
-            
+
             // Log promptFeedback if present (can indicate safety blocks)
             if (chunk.promptFeedback) {
-              console.log("[vertex-ai] promptFeedback:", JSON.stringify(chunk.promptFeedback, null, 2));
+              console.log(
+                "[vertex-ai] promptFeedback:",
+                JSON.stringify(chunk.promptFeedback, null, 2),
+              );
             }
-            
+
             const candidate = chunk.candidates?.[0];
 
             if (candidate?.content?.parts) {
@@ -602,8 +548,10 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       }
 
       // Log stream completion
-      console.log(`[vertex-ai] Stream completed. Content blocks: ${output.content.length}, stopReason: ${output.stopReason}`);
-      
+      console.log(
+        `[vertex-ai] Stream completed. Content blocks: ${output.content.length}, stopReason: ${output.stopReason}`,
+      );
+
       // Warn if no content was generated
       if (output.content.length === 0) {
         console.warn("[vertex-ai] Warning: No content generated in response");

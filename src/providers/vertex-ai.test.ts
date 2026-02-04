@@ -409,8 +409,7 @@ describe("vertex-ai debug logging", () => {
     expect(logCalls.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("logs context.messages summary and requestBody", async () => {
-
+  it("logs concise request summary instead of verbose JSON dumps", async () => {
     const model = makeVertexAIModel("gemini-3-flash-preview");
     const context: Context = {
       messages: [
@@ -433,102 +432,17 @@ describe("vertex-ai debug logging", () => {
           content: [{ type: "text", text: "Sunny, 75°F" }],
         },
       ],
-    };
-
-    const logCalls: unknown[] = [];
-    console.log = vi.fn((...args: unknown[]) => {
-      logCalls.push(args);
-    });
-
-    global.fetch = vi.fn(async () => {
-      return new Response(null, { status: 400 });
-    }) as typeof fetch;
-
-    try {
-      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
-      for await (const _event of stream) {
-        // Consume stream
-      }
-    } catch {
-      // Expected to fail
-    }
-
-    // Should have two log calls: one for messages summary, one for requestBody
-    expect(logCalls.length).toBeGreaterThanOrEqual(2);
-
-    // Check messages summary log
-    const messagesSummaryLog = logCalls.find(
-      (log) => Array.isArray(log) && log[0] === "[vertex-ai] context.messages summary:",
-    );
-    expect(messagesSummaryLog).toBeDefined();
-
-    // Check requestBody log
-    const requestBodyLog = logCalls.find(
-      (log) => Array.isArray(log) && log[0] === "[vertex-ai] redacted requestBody:",
-    );
-    expect(requestBodyLog).toBeDefined();
-  });
-
-  it("truncates long message content to 120 characters in summary", async () => {
-    const longMessage = "a".repeat(200);
-    const model = makeVertexAIModel("gemini-3-flash-preview");
-    const context: Context = {
-      messages: [{ role: "user", content: longMessage }],
-    };
-
-    const logCalls: unknown[] = [];
-    console.log = vi.fn((...args: unknown[]) => {
-      logCalls.push(args);
-    });
-
-    global.fetch = vi.fn(async () => {
-      return new Response(null, { status: 400 });
-    }) as typeof fetch;
-
-    try {
-      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
-      for await (const _event of stream) {
-        // Consume stream
-      }
-    } catch {
-      // Expected to fail
-    }
-
-    const messagesSummaryLog = logCalls.find(
-      (log) => Array.isArray(log) && log[0] === "[vertex-ai] context.messages summary:",
-    );
-    expect(messagesSummaryLog).toBeDefined();
-
-    if (messagesSummaryLog && Array.isArray(messagesSummaryLog)) {
-      const summaryJson = messagesSummaryLog[1] as string;
-      const summary = JSON.parse(summaryJson);
-      expect(summary[0].preview).toHaveLength(123); // 120 chars + "..."
-      expect(summary[0].preview).toMatch(/^a{120}\.\.\.$/);
-    }
-  });
-
-  it("includes functionCall and functionResponse in logged requestBody", async () => {
-
-    const model = makeVertexAIModel("gemini-3-flash-preview");
-    const context: Context = {
-      messages: [
-        { role: "user", content: "What is the weather?" },
+      tools: [
         {
-          role: "assistant",
-          content: [
-            {
-              type: "toolCall",
-              id: "call_123",
-              name: "get_weather",
-              arguments: { location: "NYC" },
+          name: "get_weather",
+          description: "Get weather information",
+          parameters: {
+            type: "object",
+            properties: {
+              location: { type: "string" },
             },
-          ],
-        },
-        {
-          role: "toolResult",
-          toolCallId: "call_123",
-          toolName: "get_weather",
-          content: [{ type: "text", text: "Sunny, 75°F" }],
+            required: ["location"],
+          },
         },
       ],
     };
@@ -551,23 +465,111 @@ describe("vertex-ai debug logging", () => {
       // Expected to fail
     }
 
-    const requestBodyLog = logCalls.find(
+    // Should have log calls
+    expect(logCalls.length).toBeGreaterThanOrEqual(1);
+
+    // Check concise request summary log
+    const requestSummaryLog = logCalls.find(
+      (log) =>
+        Array.isArray(log) && typeof log[0] === "string" && log[0].includes("[vertex-ai] Request:"),
+    );
+    expect(requestSummaryLog).toBeDefined();
+    expect(requestSummaryLog).toEqual(["[vertex-ai] Request: 3 messages, 1 tools"]);
+
+    // Verify verbose logs are NOT present
+    const verboseMessageLog = logCalls.find(
+      (log) => Array.isArray(log) && log[0] === "[vertex-ai] context.messages summary:",
+    );
+    expect(verboseMessageLog).toBeUndefined();
+
+    const verboseBodyLog = logCalls.find(
       (log) => Array.isArray(log) && log[0] === "[vertex-ai] redacted requestBody:",
     );
-    expect(requestBodyLog).toBeDefined();
+    expect(verboseBodyLog).toBeUndefined();
+  });
 
-    if (requestBodyLog && Array.isArray(requestBodyLog)) {
-      const bodyJson = requestBodyLog[1] as string;
-      const body = JSON.parse(bodyJson);
+  it("logs response status for successful and failed requests", async () => {
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [{ role: "user", content: "test" }],
+    };
 
-      // Verify functionCall is present
-      expect(body.contents[1].parts[0]).toHaveProperty("functionCall");
-      expect(body.contents[1].parts[0].functionCall.name).toBe("get_weather");
+    const logCalls: unknown[] = [];
+    const errorCalls: unknown[] = [];
+    console.log = vi.fn((...args: unknown[]) => {
+      logCalls.push(args);
+    });
+    console.error = vi.fn((...args: unknown[]) => {
+      errorCalls.push(args);
+    });
 
-      // Verify functionResponse is present
-      expect(body.contents[2].parts[0]).toHaveProperty("functionResponse");
-      expect(body.contents[2].parts[0].functionResponse.name).toBe("get_weather");
+    global.fetch = vi.fn(async () => {
+      return new Response("Error message", { status: 400 });
+    }) as typeof fetch;
+
+    try {
+      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      for await (const _event of stream) {
+        // Consume stream
+      }
+    } catch {
+      // Expected to fail
     }
+
+    // Check response status log
+    const responseStatusLog = logCalls.find(
+      (log) =>
+        Array.isArray(log) &&
+        typeof log[0] === "string" &&
+        log[0].includes("[vertex-ai] Response status:"),
+    );
+    expect(responseStatusLog).toBeDefined();
+    expect(responseStatusLog).toEqual(["[vertex-ai] Response status: 400"]);
+
+    // Check error log for failed request
+    const errorLog = errorCalls.find(
+      (log) =>
+        Array.isArray(log) &&
+        typeof log[0] === "string" &&
+        log[0].includes("[vertex-ai] API error:"),
+    );
+    expect(errorLog).toBeDefined();
+    expect(errorLog).toEqual(["[vertex-ai] API error: 400 Error message"]);
+  });
+
+  it("logs SSE stream start indicator", async () => {
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [{ role: "user", content: "test" }],
+    };
+
+    const logCalls: unknown[] = [];
+    console.log = vi.fn((...args: unknown[]) => {
+      logCalls.push(args);
+    });
+
+    // Mock successful response
+    const mockSSE = `data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}\n\ndata: [DONE]\n\n`;
+    global.fetch = vi.fn(async () => {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(mockSSE));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }) as typeof fetch;
+
+    const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+    for await (const _event of stream) {
+      // Consume stream
+    }
+
+    // Check SSE stream start log
+    const sseStartLog = logCalls.find(
+      (log) => Array.isArray(log) && log[0] === "[vertex-ai] Starting SSE stream parsing...",
+    );
+    expect(sseStartLog).toBeDefined();
   });
 });
 
