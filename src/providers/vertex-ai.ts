@@ -54,6 +54,7 @@ interface GooglePart {
     mimeType: string;
     data: string;
   };
+  thoughtSignature?: string;
 }
 
 interface GoogleContent {
@@ -120,9 +121,6 @@ interface GoogleRequest {
   };
 }
 
-// Experimental toggle: when true, toolResult uses role "model"; when false, uses role "user"
-const FORCE_TOOLRESULT_AS_MODEL = false;
-
 let toolCallCounter = 0;
 
 function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
@@ -161,20 +159,24 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
           if (block.id) {
             argsWithMarker.__openclaw_tool_call_id = block.id;
             // Debug logging: injecting internal id
-            try {
-              console.log(
-                `[vertex-ai] outgoing toolCall — injecting id: ${block.id} into functionCall.args for ${block.name}`,
-              );
-            } catch (err) {
-              console.warn("[vertex-ai] debug logging failed:", err);
-            }
+            console.log(
+              `[vertex-ai] outgoing toolCall — injecting id: ${block.id} into functionCall.args for ${block.name}`,
+            );
           }
-          parts.push({
+
+          const part: GooglePart = {
             functionCall: {
               name: block.name,
               args: argsWithMarker,
             },
-          });
+          };
+
+          // Include thoughtSignature if present
+          if ((block as any).thoughtSignature) {
+            part.thoughtSignature = (block as any).thoughtSignature;
+          }
+
+          parts.push(part);
         }
       }
       if (parts.length > 0) {
@@ -192,10 +194,10 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
           });
         }
       }
-      // Use experimental toggle to control toolResult role
+      // Use "user" role for tool results
       if (parts.length > 0) {
         contents.push({
-          role: FORCE_TOOLRESULT_AS_MODEL ? "model" : "user",
+          role: "user",
           parts,
         });
       }
@@ -267,11 +269,7 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       }
 
       // Debug logging: streamVertexAI entry point
-      try {
-        console.log(`[vertex-ai] streamVertexAI entered — model: ${model.id}`);
-      } catch (err) {
-        console.warn("[vertex-ai] debug logging failed:", err);
-      }
+      console.log(`[vertex-ai] streamVertexAI entered — model: ${model.id}`);
 
       // Build the request body
       const requestBody: GoogleRequest = {
@@ -320,14 +318,9 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       const endpoint = `${baseUrl}/${model.id}:streamGenerateContent?key=${apiKey}&alt=sse`;
 
       // Debug logging: concise request summary
-      try {
-        console.log(
-          `[vertex-ai] Request: ${context.messages.length} messages, ${context.tools?.length || 0} tools`,
-        );
-      } catch (err) {
-        // Avoid interfering with runtime if logging fails
-        console.warn("[vertex-ai] debug logging failed:", err);
-      }
+      console.log(
+        `[vertex-ai] Request: ${context.messages.length} messages, ${context.tools?.length || 0} tools`,
+      );
 
       // Call onPayload if provided
       options?.onPayload?.(requestBody);
@@ -467,23 +460,20 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
                     `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`;
 
                   // Debug logging: tool call id resolution
-                  try {
-                    console.log(
-                      `[vertex-ai] functionCall received — name: ${part.functionCall.name}, echoedId: ${echoedId || "(none)"}, serverId: ${serverId || "(none)"}, resolved: ${toolCallId}`,
-                    );
-                  } catch (err) {
-                    console.warn("[vertex-ai] debug logging failed:", err);
-                  }
+                  console.log(
+                    `[vertex-ai] functionCall received — name: ${part.functionCall.name}, echoedId: ${echoedId || "(none)"}, serverId: ${serverId || "(none)"}, resolved: ${toolCallId}`,
+                  );
 
                   // Remove the internal marker from arguments before creating the toolCall
                   const cleanArgs = { ...args };
                   delete cleanArgs.__openclaw_tool_call_id;
 
-                  const toolCall: ToolCall = {
+                  const toolCall: ToolCall & { thoughtSignature?: string } = {
                     type: "toolCall",
                     id: toolCallId,
                     name: part.functionCall.name,
                     arguments: cleanArgs,
+                    thoughtSignature: part.thoughtSignature,
                   };
                   output.content.push(toolCall);
                   stream.push({
