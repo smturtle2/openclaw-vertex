@@ -1,10 +1,14 @@
 /**
  * Vertex AI provider implementation with API key as query parameter.
  *
- * This provider is similar to google-generative-ai but sends the API key
+ * This provider uses the Vertex AI public endpoint and sends the API key
  * as a query parameter (?key=API_KEY) instead of as a header (x-goog-api-key).
  *
- * Endpoint format: https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent?key={apiKey}
+ * Vertex AI API differences from standard Google Generative AI:
+ * - Endpoint format: https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:streamGenerateContent?key={apiKey}&alt=sse
+ * - Does not accept `id` field in functionCall requests (though it may return ids in responses)
+ * - Only accepts `role: "user"` or `role: "model"` in contents (no `role: "function"`)
+ * - Tool results (functionResponse) must use `role: "model"` to be visible to the model
  */
 
 import type {
@@ -172,9 +176,9 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
           });
         }
       }
-      // Vertex AI expects tool results with role "user" (not "function")
+      // Vertex AI expects tool results with role "model" so they are visible to the model
       if (parts.length > 0) {
-        contents.push({ role: "user", parts });
+        contents.push({ role: "model", parts });
       }
     }
   }
