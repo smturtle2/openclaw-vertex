@@ -249,7 +249,7 @@ describe("vertex-ai request body format", () => {
     ]);
   });
 
-  it("formats tool calls without id field in functionCall", async () => {
+  it("formats tool calls without id field in functionCall but injects __openclaw_tool_call_id in args", async () => {
     const model = makeVertexAIModel("gemini-3-flash-preview");
     const context: Context = {
       messages: [
@@ -286,7 +286,7 @@ describe("vertex-ai request body format", () => {
       // Expected to fail
     }
 
-    // Verify functionCall does not contain id field
+    // Verify functionCall does not contain id field at top level but has __openclaw_tool_call_id in args
     expect(capturedBody).toBeDefined();
     expect((capturedBody as any).contents).toEqual([
       { role: "user", parts: [{ text: "What's the weather in NYC?" }] },
@@ -296,15 +296,20 @@ describe("vertex-ai request body format", () => {
           {
             functionCall: {
               name: "get_weather",
-              args: { location: "NYC" },
-              // id should NOT be present
+              args: { location: "NYC", __openclaw_tool_call_id: "call_123" },
+              // id should NOT be present at top level
             },
           },
         ],
       },
     ]);
-    // Explicitly verify id is not in the functionCall
+    // Explicitly verify id is not in the functionCall at top level
     expect((capturedBody as any).contents[1].parts[0].functionCall).not.toHaveProperty("id");
+    // But verify __openclaw_tool_call_id is in args
+    expect((capturedBody as any).contents[1].parts[0].functionCall.args).toHaveProperty(
+      "__openclaw_tool_call_id",
+      "call_123",
+    );
   });
 
   it("formats tool results with role 'model' (not 'user' or 'function')", async () => {
@@ -599,5 +604,116 @@ describe("vertex-ai debug logging", () => {
       expect(body.contents[2].parts[0]).toHaveProperty("functionResponse");
       expect(body.contents[2].parts[0].functionResponse.name).toBe("get_weather");
     }
+  });
+});
+
+describe("vertex-ai SSE response parsing with tool call id", () => {
+  it("prefers echoed __openclaw_tool_call_id from args over server id", async () => {
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [{ role: "user", content: "What's the weather?" }],
+    };
+
+    // Mock SSE response with echoed __openclaw_tool_call_id in args
+    const mockSSE = `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"NYC","__openclaw_tool_call_id":"call_123"},"id":"server_generated_id"}}]}}]}\n\ndata: [DONE]\n\n`;
+
+    global.fetch = vi.fn(async () => {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(mockSSE));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }) as typeof fetch;
+
+    const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+    const events = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    // Find the toolcall_end event
+    const toolcallEnd = events.find((e) => e.type === "toolcall_end");
+    expect(toolcallEnd).toBeDefined();
+    expect(toolcallEnd).toHaveProperty("toolCall");
+
+    // Verify the id is the echoed one, not the server one
+    expect((toolcallEnd as any).toolCall.id).toBe("call_123");
+    expect((toolcallEnd as any).toolCall.name).toBe("get_weather");
+
+    // Verify the __openclaw_tool_call_id marker is removed from arguments
+    expect((toolcallEnd as any).toolCall.arguments).not.toHaveProperty("__openclaw_tool_call_id");
+    expect((toolcallEnd as any).toolCall.arguments).toEqual({ location: "NYC" });
+  });
+
+  it("falls back to server id when __openclaw_tool_call_id is not present", async () => {
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [{ role: "user", content: "What's the weather?" }],
+    };
+
+    // Mock SSE response without __openclaw_tool_call_id
+    const mockSSE = `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"NYC"},"id":"server_generated_id"}}]}}]}\n\ndata: [DONE]\n\n`;
+
+    global.fetch = vi.fn(async () => {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(mockSSE));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }) as typeof fetch;
+
+    const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+    const events = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    // Find the toolcall_end event
+    const toolcallEnd = events.find((e) => e.type === "toolcall_end");
+    expect(toolcallEnd).toBeDefined();
+
+    // Verify the id is the server one
+    expect((toolcallEnd as any).toolCall.id).toBe("server_generated_id");
+    expect((toolcallEnd as any).toolCall.name).toBe("get_weather");
+    expect((toolcallEnd as any).toolCall.arguments).toEqual({ location: "NYC" });
+  });
+
+  it("synthesizes id when neither echoed nor server id is present", async () => {
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [{ role: "user", content: "What's the weather?" }],
+    };
+
+    // Mock SSE response without any id
+    const mockSSE = `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"NYC"}}}]}}]}\n\ndata: [DONE]\n\n`;
+
+    global.fetch = vi.fn(async () => {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(mockSSE));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }) as typeof fetch;
+
+    const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+    const events = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    // Find the toolcall_end event
+    const toolcallEnd = events.find((e) => e.type === "toolcall_end");
+    expect(toolcallEnd).toBeDefined();
+
+    // Verify a synthesized id is present (should start with get_weather_)
+    expect((toolcallEnd as any).toolCall.id).toMatch(/^get_weather_\d+_\d+$/);
+    expect((toolcallEnd as any).toolCall.name).toBe("get_weather");
+    expect((toolcallEnd as any).toolCall.arguments).toEqual({ location: "NYC" });
   });
 });

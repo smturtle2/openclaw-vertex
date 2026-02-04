@@ -212,11 +212,26 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
         if (block.type === "text") {
           parts.push({ text: block.text });
         } else if (block.type === "toolCall") {
-          // Vertex AI does not accept id field in functionCall
+          // Vertex AI does not accept id field in functionCall at the top level,
+          // so we inject the internal toolCall id into the args with a marker key
+          const args = { ...block.arguments };
+          if (block.id) {
+            args.__openclaw_tool_call_id = block.id;
+            // Debug logging: injecting internal id
+            if (process.env.VERTEX_AI_DEBUG_PAYLOAD === "1") {
+              try {
+                console.log(
+                  `[vertex-ai] outgoing toolCall — injecting id: ${block.id} into functionCall.args for ${block.name}`,
+                );
+              } catch (err) {
+                console.warn("[vertex-ai] debug logging failed:", err);
+              }
+            }
+          }
           parts.push({
             functionCall: {
               name: block.name,
-              args: block.arguments,
+              args,
             },
           });
         }
@@ -308,6 +323,15 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
       if (!apiKey) {
         throw new Error("Vertex AI requires an API key");
+      }
+
+      // Debug logging: streamVertexAI entry point
+      if (process.env.VERTEX_AI_DEBUG_PAYLOAD === "1") {
+        try {
+          console.log(`[vertex-ai] streamVertexAI entered — model: ${model.id}`);
+        } catch (err) {
+          console.warn("[vertex-ai] debug logging failed:", err);
+        }
       }
 
       // Build the request body
@@ -484,14 +508,35 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
                     currentBlock = null;
                   }
 
+                  // Prefer the echoed internal id from args, fall back to server id, or synthesize
+                  const args = part.functionCall.args ?? {};
+                  const echoedId = args.__openclaw_tool_call_id as string | undefined;
+                  const serverId = part.functionCall.id;
                   const toolCallId =
-                    part.functionCall.id ||
+                    echoedId ||
+                    serverId ||
                     `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`;
+
+                  // Debug logging: tool call id resolution
+                  if (process.env.VERTEX_AI_DEBUG_PAYLOAD === "1") {
+                    try {
+                      console.log(
+                        `[vertex-ai] functionCall received — name: ${part.functionCall.name}, echoedId: ${echoedId || "(none)"}, serverId: ${serverId || "(none)"}, resolved: ${toolCallId}`,
+                      );
+                    } catch (err) {
+                      console.warn("[vertex-ai] debug logging failed:", err);
+                    }
+                  }
+
+                  // Remove the internal marker from arguments before creating the toolCall
+                  const cleanArgs = { ...args };
+                  delete cleanArgs.__openclaw_tool_call_id;
+
                   const toolCall: ToolCall = {
                     type: "toolCall",
                     id: toolCallId,
                     name: part.functionCall.name,
-                    arguments: part.functionCall.args ?? {},
+                    arguments: cleanArgs,
                   };
                   output.content.push(toolCall);
                   stream.push({
