@@ -307,7 +307,7 @@ describe("vertex-ai request body format", () => {
     expect((capturedBody as any).contents[1].parts[0].functionCall).not.toHaveProperty("id");
   });
 
-  it("formats tool results with role 'user' (not 'function')", async () => {
+  it("formats tool results with role 'model' (not 'user' or 'function')", async () => {
     const model = makeVertexAIModel("gemini-3-flash-preview");
     const context: Context = {
       messages: [
@@ -350,12 +350,12 @@ describe("vertex-ai request body format", () => {
       // Expected to fail
     }
 
-    // Verify tool result uses role "user" not "function"
+    // Verify tool result uses role "model" not "user" or "function"
     expect(capturedBody).toBeDefined();
     const contents = (capturedBody as any).contents;
     expect(contents).toHaveLength(3);
     expect(contents[2]).toEqual({
-      role: "user", // Should be "user" not "function"
+      role: "model", // Should be "model" not "user" or "function"
       parts: [
         {
           functionResponse: {
