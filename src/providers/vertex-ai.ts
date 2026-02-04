@@ -1,16 +1,16 @@
 /**
- * Vertex AI provider implementation with API key as query parameter.
+ * Vertex AI provider implementation using @google/genai SDK.
  *
- * This provider uses the Vertex AI public endpoint and sends the API key
- * as a query parameter (?key=API_KEY) instead of as a header (x-goog-api-key).
+ * This provider uses the @google/genai SDK with Vertex AI mode to stream responses.
+ * It maintains all existing event patterns and internal mechanisms.
  *
  * Vertex AI API differences from standard Google Generative AI:
- * - Endpoint format: https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:streamGenerateContent?key={apiKey}&alt=sse
  * - Does not accept `id` field in functionCall requests (though it may return ids in responses)
  * - Only accepts `role: "user"` or `role: "model"` in contents (no `role: "function"`)
  * - Tool results (functionResponse) must use `role: "user"` to work correctly with continuous tool execution
  */
 
+import type { Candidate, Content, GenerateContentResponse, Part } from "@google/genai";
 import type {
   AssistantMessage,
   Context,
@@ -22,6 +22,7 @@ import type {
   ThinkingContent,
   ToolCall,
 } from "@mariozechner/pi-ai";
+import { GoogleGenAI } from "@google/genai";
 import {
   calculateCost,
   createAssistantMessageEventStream,
@@ -37,98 +38,14 @@ interface VertexAIOptions extends StreamOptions {
   };
 }
 
-// Google Generative AI types (matching the API response structure)
-interface GooglePart {
-  text?: string;
-  functionCall?: {
-    name: string;
-    args?: Record<string, unknown>;
-    // Note: id is not sent in requests but may be present in responses
-    id?: string;
-  };
-  functionResponse?: {
-    name: string;
-    response: Record<string, unknown>;
-  };
-  inlineData?: {
-    mimeType: string;
-    data: string;
-  };
-  thoughtSignature?: string;
-}
-
-interface GoogleContent {
-  // Vertex AI only accepts "user" and "model" roles in contents
-  role: "user" | "model";
-  parts: GooglePart[];
-}
-
-interface GoogleCandidate {
-  content?: GoogleContent;
-  finishReason?: string;
-  index?: number;
-  safetyRatings?: Array<{
-    category: string;
-    probability: string;
-  }>;
-}
-
-interface GoogleUsageMetadata {
-  promptTokenCount?: number;
-  candidatesTokenCount?: number;
-  totalTokenCount?: number;
-}
-
-interface GoogleResponse {
-  candidates?: GoogleCandidate[];
-  usageMetadata?: GoogleUsageMetadata;
-  promptFeedback?: {
-    blockReason?: string;
-    safetyRatings?: Array<{
-      category: string;
-      probability: string;
-    }>;
-  };
-}
-
-interface GoogleRequest {
-  contents: GoogleContent[];
-  systemInstruction?: { parts: GooglePart[] };
-  generationConfig?: {
-    temperature?: number;
-    maxOutputTokens?: number;
-    topP?: number;
-    topK?: number;
-    candidateCount?: number;
-    stopSequences?: string[];
-  };
-  safetySettings?: Array<{
-    category: string;
-    threshold: string;
-  }>;
-  tools?: Array<{
-    functionDeclarations?: Array<{
-      name: string;
-      description: string;
-      parameters?: Record<string, unknown>;
-    }>;
-  }>;
-  toolConfig?: {
-    functionCallingConfig?: {
-      mode?: string;
-      allowedFunctionNames?: string[];
-    };
-  };
-}
-
 let toolCallCounter = 0;
 
-function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
-  const contents: GoogleContent[] = [];
+function convertMessagesToGoogleFormat(context: Context): Content[] {
+  const contents: Content[] = [];
 
   for (const msg of context.messages) {
     if (msg.role === "user") {
-      const parts: GooglePart[] = [];
+      const parts: Part[] = [];
       const content = msg.content;
       if (typeof content === "string") {
         parts.push({ text: content });
@@ -148,7 +65,7 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
       }
       contents.push({ role: "user", parts });
     } else if (msg.role === "assistant") {
-      const parts: GooglePart[] = [];
+      const parts: Part[] = [];
       for (const block of msg.content) {
         if (block.type === "text") {
           parts.push({ text: block.text });
@@ -164,7 +81,7 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
             );
           }
 
-          const part: GooglePart = {
+          const part: Part = {
             functionCall: {
               name: block.name,
               args: argsWithMarker,
@@ -183,7 +100,7 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
         contents.push({ role: "model", parts });
       }
     } else if (msg.role === "toolResult") {
-      const parts: GooglePart[] = [];
+      const parts: Part[] = [];
       for (const block of msg.content) {
         if (block.type === "text") {
           parts.push({
@@ -207,18 +124,20 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
   return contents;
 }
 
-function convertTools(tools: Context["tools"]): GoogleRequest["tools"] {
+function convertTools(tools: Context["tools"]) {
   if (!tools || tools.length === 0) {
     return undefined;
   }
 
-  const functionDeclarations = tools.map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
+  return tools.map((tool) => ({
+    functionDeclarations: [
+      {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      },
+    ],
   }));
-
-  return [{ functionDeclarations }];
 }
 
 function mapStopReason(finishReason?: string): AssistantMessage["stopReason"] {
@@ -271,35 +190,35 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       // Debug logging: streamVertexAI entry point
       console.log(`[vertex-ai] streamVertexAI entered — model: ${model.id}`);
 
-      // Build the request body
-      const requestBody: GoogleRequest = {
-        contents: convertMessagesToGoogleFormat(context),
-      };
+      // Debug logging: concise request summary
+      console.log(
+        `[vertex-ai] Request: ${context.messages.length} messages, ${context.tools?.length || 0} tools`,
+      );
 
-      // Add system instruction if present
-      if (context.systemPrompt) {
-        requestBody.systemInstruction = {
-          parts: [{ text: context.systemPrompt }],
-        };
-      }
+      // Create GoogleGenAI client
+      const client = new GoogleGenAI({
+        apiKey,
+        vertexai: true,
+      });
+
+      // Build the request parameters
+      const contents = convertMessagesToGoogleFormat(context);
+
+      const config: Record<string, any> = {};
 
       // Add generation config
-      const generationConfig: GoogleRequest["generationConfig"] = {};
       if (options?.temperature !== undefined) {
-        generationConfig.temperature = options.temperature;
+        config.temperature = options.temperature;
       }
       if (options?.maxTokens !== undefined) {
-        generationConfig.maxOutputTokens = options.maxTokens;
-      }
-      if (Object.keys(generationConfig).length > 0) {
-        requestBody.generationConfig = generationConfig;
+        config.maxOutputTokens = options.maxTokens;
       }
 
       // Add tools if present
       if (context.tools && context.tools.length > 0) {
-        requestBody.tools = convertTools(context.tools);
+        config.tools = convertTools(context.tools);
         if (options?.toolChoice) {
-          requestBody.toolConfig = {
+          config.toolConfig = {
             functionCallingConfig: {
               mode:
                 options.toolChoice === "auto"
@@ -312,209 +231,169 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
         }
       }
 
-      // Build the URL with API key as query parameter
-      const baseUrl =
-        model.baseUrl || "https://aiplatform.googleapis.com/v1/publishers/google/models";
-      const endpoint = `${baseUrl}/${model.id}:streamGenerateContent?key=${apiKey}&alt=sse`;
-
-      // Debug logging: concise request summary
-      console.log(
-        `[vertex-ai] Request: ${context.messages.length} messages, ${context.tools?.length || 0} tools`,
-      );
+      // Build the request body for onPayload
+      const requestBody: any = {
+        contents,
+        ...(context.systemPrompt && {
+          systemInstruction: { parts: [{ text: context.systemPrompt }] },
+        }),
+        ...(Object.keys(config).length > 0 && { config }),
+      };
 
       // Call onPayload if provided
       options?.onPayload?.(requestBody);
 
-      // Make the request
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        ...(model.headers || {}),
-        ...(options?.headers || {}),
+      // Prepare request parameters
+      const params: any = {
+        model: model.id,
+        contents,
+        config,
       };
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(requestBody),
-      });
-
-      // Debug logging: HTTP response status
-      console.log(`[vertex-ai] Response status: ${response.status}`);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[vertex-ai] API error: ${response.status} ${errorText}`);
-        throw new Error(`Vertex AI request failed: ${response.status} ${errorText}`);
+      // Add system instruction if present
+      if (context.systemPrompt) {
+        params.systemInstruction = { parts: [{ text: context.systemPrompt }] };
       }
 
-      if (!response.body) {
-        throw new Error("Response body is null");
-      }
+      // Debug logging: Starting stream
+      console.log("[vertex-ai] Starting SDK stream...");
 
       stream.push({ type: "start", partial: output });
 
-      // Debug logging: SSE stream start
-      console.log("[vertex-ai] Starting SSE stream parsing...");
+      // Use SDK to stream content
+      const streamingResp = await client.models.generateContentStream(params);
 
-      // Parse the SSE stream
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
       let currentBlock: TextContent | ThinkingContent | null = null;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      for await (const chunk of streamingResp) {
+        // Log each chunk received
+        console.log("[vertex-ai] SDK chunk received:", JSON.stringify(chunk, null, 2));
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        // Log promptFeedback if present (can indicate safety blocks)
+        if (chunk.promptFeedback) {
+          console.log("[vertex-ai] promptFeedback:", JSON.stringify(chunk.promptFeedback, null, 2));
+        }
 
-        for (const line of lines) {
-          if (!line.trim() || line.startsWith(":")) continue;
-          if (!line.startsWith("data: ")) continue;
+        const candidate = chunk.candidates?.[0];
 
-          const data = line.slice(6);
-          if (data === "[DONE]") continue;
+        if (candidate?.content?.parts) {
+          for (const part of candidate.content.parts) {
+            if (part.text !== undefined) {
+              // End previous block if it's thinking
+              if (currentBlock !== null) {
+                if (currentBlock.type === "thinking") {
+                  stream.push({
+                    type: "thinking_end",
+                    contentIndex: output.content.length - 1,
+                    content: (currentBlock as ThinkingContent).thinking,
+                    partial: output,
+                  });
+                  currentBlock = null;
+                }
+              }
+              // Start new text block if needed
+              if (currentBlock === null) {
+                currentBlock = { type: "text", text: "" };
+                output.content.push(currentBlock);
+                stream.push({
+                  type: "text_start",
+                  contentIndex: output.content.length - 1,
+                  partial: output,
+                });
+              }
+              // Append text to current block
+              if (currentBlock.type === "text") {
+                (currentBlock as TextContent).text += part.text;
+                stream.push({
+                  type: "text_delta",
+                  contentIndex: output.content.length - 1,
+                  delta: part.text,
+                  partial: output,
+                });
+              }
+            }
 
-          try {
-            const chunk: GoogleResponse = JSON.parse(data);
+            if (part.functionCall) {
+              if (currentBlock !== null) {
+                if (currentBlock.type === "text") {
+                  stream.push({
+                    type: "text_end",
+                    contentIndex: output.content.length - 1,
+                    content: (currentBlock as TextContent).text,
+                    partial: output,
+                  });
+                } else if (currentBlock.type === "thinking") {
+                  stream.push({
+                    type: "thinking_end",
+                    contentIndex: output.content.length - 1,
+                    content: (currentBlock as ThinkingContent).thinking,
+                    partial: output,
+                  });
+                }
+                currentBlock = null;
+              }
 
-            // Log each SSE chunk received
-            console.log("[vertex-ai] SSE chunk received:", JSON.stringify(chunk, null, 2));
+              // Prefer the echoed internal id from args, fall back to server id, or synthesize
+              const args = part.functionCall.args ?? {};
+              const echoedId = args.__openclaw_tool_call_id as string | undefined;
+              const serverId = (part.functionCall as any).id;
+              const toolCallId =
+                echoedId ||
+                serverId ||
+                `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`;
 
-            // Log promptFeedback if present (can indicate safety blocks)
-            if (chunk.promptFeedback) {
+              // Debug logging: tool call id resolution
               console.log(
-                "[vertex-ai] promptFeedback:",
-                JSON.stringify(chunk.promptFeedback, null, 2),
+                `[vertex-ai] functionCall received — name: ${part.functionCall.name}, echoedId: ${echoedId || "(none)"}, serverId: ${serverId || "(none)"}, resolved: ${toolCallId}`,
               );
+
+              // Remove the internal marker from arguments before creating the toolCall
+              const cleanArgs = { ...args };
+              delete cleanArgs.__openclaw_tool_call_id;
+
+              const toolCall: ToolCall & { thoughtSignature?: string } = {
+                type: "toolCall",
+                id: toolCallId,
+                name: part.functionCall.name,
+                arguments: cleanArgs,
+                thoughtSignature: part.thoughtSignature,
+              };
+              output.content.push(toolCall);
+              stream.push({
+                type: "toolcall_start",
+                contentIndex: output.content.length - 1,
+                partial: output,
+              });
+              stream.push({
+                type: "toolcall_delta",
+                contentIndex: output.content.length - 1,
+                delta: JSON.stringify(toolCall.arguments),
+                partial: output,
+              });
+              stream.push({
+                type: "toolcall_end",
+                contentIndex: output.content.length - 1,
+                toolCall,
+                partial: output,
+              });
             }
-
-            const candidate = chunk.candidates?.[0];
-
-            if (candidate?.content?.parts) {
-              for (const part of candidate.content.parts) {
-                if (part.text !== undefined) {
-                  // End previous block if it's thinking
-                  if (currentBlock !== null) {
-                    if (currentBlock.type === "thinking") {
-                      stream.push({
-                        type: "thinking_end",
-                        contentIndex: output.content.length - 1,
-                        content: (currentBlock as ThinkingContent).thinking,
-                        partial: output,
-                      });
-                      currentBlock = null;
-                    }
-                  }
-                  // Start new text block if needed
-                  if (currentBlock === null) {
-                    currentBlock = { type: "text", text: "" };
-                    output.content.push(currentBlock);
-                    stream.push({
-                      type: "text_start",
-                      contentIndex: output.content.length - 1,
-                      partial: output,
-                    });
-                  }
-                  // Append text to current block
-                  if (currentBlock.type === "text") {
-                    (currentBlock as TextContent).text += part.text;
-                    stream.push({
-                      type: "text_delta",
-                      contentIndex: output.content.length - 1,
-                      delta: part.text,
-                      partial: output,
-                    });
-                  }
-                }
-
-                if (part.functionCall) {
-                  if (currentBlock !== null) {
-                    if (currentBlock.type === "text") {
-                      stream.push({
-                        type: "text_end",
-                        contentIndex: output.content.length - 1,
-                        content: (currentBlock as TextContent).text,
-                        partial: output,
-                      });
-                    } else if (currentBlock.type === "thinking") {
-                      stream.push({
-                        type: "thinking_end",
-                        contentIndex: output.content.length - 1,
-                        content: (currentBlock as ThinkingContent).thinking,
-                        partial: output,
-                      });
-                    }
-                    currentBlock = null;
-                  }
-
-                  // Prefer the echoed internal id from args, fall back to server id, or synthesize
-                  const args = part.functionCall.args ?? {};
-                  const echoedId = args.__openclaw_tool_call_id as string | undefined;
-                  const serverId = part.functionCall.id;
-                  const toolCallId =
-                    echoedId ||
-                    serverId ||
-                    `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`;
-
-                  // Debug logging: tool call id resolution
-                  console.log(
-                    `[vertex-ai] functionCall received — name: ${part.functionCall.name}, echoedId: ${echoedId || "(none)"}, serverId: ${serverId || "(none)"}, resolved: ${toolCallId}`,
-                  );
-
-                  // Remove the internal marker from arguments before creating the toolCall
-                  const cleanArgs = { ...args };
-                  delete cleanArgs.__openclaw_tool_call_id;
-
-                  const toolCall: ToolCall & { thoughtSignature?: string } = {
-                    type: "toolCall",
-                    id: toolCallId,
-                    name: part.functionCall.name,
-                    arguments: cleanArgs,
-                    thoughtSignature: part.thoughtSignature,
-                  };
-                  output.content.push(toolCall);
-                  stream.push({
-                    type: "toolcall_start",
-                    contentIndex: output.content.length - 1,
-                    partial: output,
-                  });
-                  stream.push({
-                    type: "toolcall_delta",
-                    contentIndex: output.content.length - 1,
-                    delta: JSON.stringify(toolCall.arguments),
-                    partial: output,
-                  });
-                  stream.push({
-                    type: "toolcall_end",
-                    contentIndex: output.content.length - 1,
-                    toolCall,
-                    partial: output,
-                  });
-                }
-              }
-            }
-
-            if (candidate?.finishReason) {
-              console.log(`[vertex-ai] finishReason: ${candidate.finishReason}`);
-              output.stopReason = mapStopReason(candidate.finishReason);
-              if (output.content.some((b) => b.type === "toolCall")) {
-                output.stopReason = "toolUse";
-              }
-            }
-
-            if (chunk.usageMetadata) {
-              output.usage.input = chunk.usageMetadata.promptTokenCount || 0;
-              output.usage.output = chunk.usageMetadata.candidatesTokenCount || 0;
-              output.usage.totalTokens = chunk.usageMetadata.totalTokenCount || 0;
-              const cost = calculateCost(model, output.usage);
-              output.usage.cost = cost;
-            }
-          } catch (err) {
-            console.warn("Failed to parse SSE chunk:", err);
           }
+        }
+
+        if (candidate?.finishReason) {
+          console.log(`[vertex-ai] finishReason: ${candidate.finishReason}`);
+          output.stopReason = mapStopReason(candidate.finishReason);
+          if (output.content.some((b) => b.type === "toolCall")) {
+            output.stopReason = "toolUse";
+          }
+        }
+
+        if (chunk.usageMetadata) {
+          output.usage.input = (chunk.usageMetadata as any).promptTokenCount || 0;
+          output.usage.output = (chunk.usageMetadata as any).candidatesTokenCount || 0;
+          output.usage.totalTokens = (chunk.usageMetadata as any).totalTokenCount || 0;
+          const cost = calculateCost(model, output.usage);
+          output.usage.cost = cost;
         }
       }
 
@@ -563,6 +442,7 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[vertex-ai] Error:", errorMessage);
       stream.push({
         type: "error",
         reason: "error",
