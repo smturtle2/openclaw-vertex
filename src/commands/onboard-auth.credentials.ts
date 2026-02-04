@@ -178,3 +178,15 @@ export async function setOpencodeZenApiKey(key: string, agentDir?: string) {
     agentDir: resolveAuthAgentDir(agentDir),
   });
 }
+
+export async function setVertexAiApiKey(key: string, agentDir?: string) {
+  upsertAuthProfile({
+    profileId: "vertex-ai:default",
+    credential: {
+      type: "api_key",
+      provider: "vertex-ai",
+      key,
+    },
+    agentDir: resolveAuthAgentDir(agentDir),
+  });
+}

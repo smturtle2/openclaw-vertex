@@ -76,6 +76,16 @@ const OLLAMA_DEFAULT_COST = {
   cacheWrite: 0,
 };
 
+// Vertex AI constants - global endpoint only (regional endpoints not supported for preview models)
+const VERTEX_AI_DEFAULT_CONTEXT_WINDOW = 1048576;
+const VERTEX_AI_DEFAULT_MAX_TOKENS = 65536;
+const VERTEX_AI_DEFAULT_COST = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+};
+
 interface OllamaModel {
   name: string;
   modified_at: string;
@@ -254,6 +264,14 @@ export function normalizeProviders(params: {
       normalizedProvider = googleNormalized;
     }
 
+    if (normalizedKey === "vertex-ai") {
+      const vertexAiNormalized = normalizeGoogleProvider(normalizedProvider);
+      if (vertexAiNormalized !== normalizedProvider) {
+        mutated = true;
+      }
+      normalizedProvider = vertexAiNormalized;
+    }
+
     next[key] = normalizedProvider;
   }
 
@@ -394,6 +412,33 @@ async function buildOllamaProvider(): Promise<ProviderConfig> {
   };
 }
 
+function buildVertexAiProvider(): ProviderConfig {
+  return {
+    baseUrl: "https://aiplatform.googleapis.com/v1",
+    api: "google-generative-ai",
+    models: [
+      {
+        id: "gemini-3-flash-preview",
+        name: "Gemini 3 Flash Preview",
+        reasoning: false,
+        input: ["text", "image"],
+        cost: VERTEX_AI_DEFAULT_COST,
+        contextWindow: VERTEX_AI_DEFAULT_CONTEXT_WINDOW,
+        maxTokens: VERTEX_AI_DEFAULT_MAX_TOKENS,
+      },
+      {
+        id: "gemini-3-pro-preview",
+        name: "Gemini 3 Pro Preview",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: VERTEX_AI_DEFAULT_COST,
+        contextWindow: VERTEX_AI_DEFAULT_CONTEXT_WINDOW,
+        maxTokens: VERTEX_AI_DEFAULT_MAX_TOKENS,
+      },
+    ],
+  };
+}
+
 export async function resolveImplicitProviders(params: {
   agentDir: string;
 }): Promise<ModelsConfig["providers"]> {
@@ -459,6 +504,14 @@ export async function resolveImplicitProviders(params: {
     resolveApiKeyFromProfiles({ provider: "ollama", store: authStore });
   if (ollamaKey) {
     providers.ollama = { ...(await buildOllamaProvider()), apiKey: ollamaKey };
+  }
+
+  // Vertex AI provider
+  const vertexAiKey =
+    resolveEnvApiKeyVarName("vertex-ai") ??
+    resolveApiKeyFromProfiles({ provider: "vertex-ai", store: authStore });
+  if (vertexAiKey) {
+    providers["vertex-ai"] = { ...buildVertexAiProvider(), apiKey: vertexAiKey };
   }
 
   return providers;
