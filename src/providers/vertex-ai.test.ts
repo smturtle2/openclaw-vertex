@@ -1,5 +1,5 @@
 import type { Context, Model } from "@mariozechner/pi-ai";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { streamVertexAI } from "./vertex-ai.js";
 
 const makeVertexAIModel = (id: string, baseUrl?: string): Model<"vertex-ai"> =>
@@ -365,5 +365,239 @@ describe("vertex-ai request body format", () => {
         },
       ],
     });
+  });
+});
+
+describe("vertex-ai debug logging", () => {
+  const originalEnv = process.env.VERTEX_AI_DEBUG_PAYLOAD;
+  const originalDebug = console.debug;
+
+  afterEach(() => {
+    // Restore original environment and console.debug
+    process.env.VERTEX_AI_DEBUG_PAYLOAD = originalEnv;
+    console.debug = originalDebug;
+  });
+
+  it("does not log when VERTEX_AI_DEBUG_PAYLOAD is not set", async () => {
+    delete process.env.VERTEX_AI_DEBUG_PAYLOAD;
+
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [{ role: "user", content: "test message" }],
+    };
+
+    const debugLogs: unknown[] = [];
+    console.debug = vi.fn((...args: unknown[]) => {
+      debugLogs.push(args);
+    });
+
+    global.fetch = vi.fn(async () => {
+      return new Response(null, { status: 400 });
+    }) as typeof fetch;
+
+    try {
+      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      for await (const _event of stream) {
+        // Consume stream
+      }
+    } catch {
+      // Expected to fail
+    }
+
+    expect(debugLogs).toHaveLength(0);
+  });
+
+  it("does not log when VERTEX_AI_DEBUG_PAYLOAD is set to '0'", async () => {
+    process.env.VERTEX_AI_DEBUG_PAYLOAD = "0";
+
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [{ role: "user", content: "test message" }],
+    };
+
+    const debugLogs: unknown[] = [];
+    console.debug = vi.fn((...args: unknown[]) => {
+      debugLogs.push(args);
+    });
+
+    global.fetch = vi.fn(async () => {
+      return new Response(null, { status: 400 });
+    }) as typeof fetch;
+
+    try {
+      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      for await (const _event of stream) {
+        // Consume stream
+      }
+    } catch {
+      // Expected to fail
+    }
+
+    expect(debugLogs).toHaveLength(0);
+  });
+
+  it("logs context.messages summary and requestBody when VERTEX_AI_DEBUG_PAYLOAD is '1'", async () => {
+    process.env.VERTEX_AI_DEBUG_PAYLOAD = "1";
+
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [
+        { role: "user", content: "What is the weather?" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call_123",
+              name: "get_weather",
+              arguments: { location: "NYC" },
+            },
+          ],
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call_123",
+          toolName: "get_weather",
+          content: [{ type: "text", text: "Sunny, 75°F" }],
+        },
+      ],
+    };
+
+    const debugLogs: unknown[] = [];
+    console.debug = vi.fn((...args: unknown[]) => {
+      debugLogs.push(args);
+    });
+
+    global.fetch = vi.fn(async () => {
+      return new Response(null, { status: 400 });
+    }) as typeof fetch;
+
+    try {
+      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      for await (const _event of stream) {
+        // Consume stream
+      }
+    } catch {
+      // Expected to fail
+    }
+
+    // Should have two debug calls: one for messages summary, one for requestBody
+    expect(debugLogs.length).toBeGreaterThanOrEqual(2);
+
+    // Check messages summary log
+    const messagesSummaryLog = debugLogs.find(
+      (log) => Array.isArray(log) && log[0] === "[vertex-ai] context.messages summary:",
+    );
+    expect(messagesSummaryLog).toBeDefined();
+
+    // Check requestBody log
+    const requestBodyLog = debugLogs.find(
+      (log) => Array.isArray(log) && log[0] === "[vertex-ai] requestBody:",
+    );
+    expect(requestBodyLog).toBeDefined();
+  });
+
+  it("truncates long message content to 120 characters in summary", async () => {
+    process.env.VERTEX_AI_DEBUG_PAYLOAD = "1";
+
+    const longMessage = "a".repeat(200);
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [{ role: "user", content: longMessage }],
+    };
+
+    const debugLogs: unknown[] = [];
+    console.debug = vi.fn((...args: unknown[]) => {
+      debugLogs.push(args);
+    });
+
+    global.fetch = vi.fn(async () => {
+      return new Response(null, { status: 400 });
+    }) as typeof fetch;
+
+    try {
+      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      for await (const _event of stream) {
+        // Consume stream
+      }
+    } catch {
+      // Expected to fail
+    }
+
+    const messagesSummaryLog = debugLogs.find(
+      (log) => Array.isArray(log) && log[0] === "[vertex-ai] context.messages summary:",
+    );
+    expect(messagesSummaryLog).toBeDefined();
+
+    if (messagesSummaryLog && Array.isArray(messagesSummaryLog)) {
+      const summaryJson = messagesSummaryLog[1] as string;
+      const summary = JSON.parse(summaryJson);
+      expect(summary[0].preview).toHaveLength(123); // 120 chars + "..."
+      expect(summary[0].preview).toMatch(/^a{120}\.\.\.$/);
+    }
+  });
+
+  it("includes functionCall and functionResponse in logged requestBody", async () => {
+    process.env.VERTEX_AI_DEBUG_PAYLOAD = "1";
+
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [
+        { role: "user", content: "What is the weather?" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call_123",
+              name: "get_weather",
+              arguments: { location: "NYC" },
+            },
+          ],
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call_123",
+          toolName: "get_weather",
+          content: [{ type: "text", text: "Sunny, 75°F" }],
+        },
+      ],
+    };
+
+    const debugLogs: unknown[] = [];
+    console.debug = vi.fn((...args: unknown[]) => {
+      debugLogs.push(args);
+    });
+
+    global.fetch = vi.fn(async () => {
+      return new Response(null, { status: 400 });
+    }) as typeof fetch;
+
+    try {
+      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      for await (const _event of stream) {
+        // Consume stream
+      }
+    } catch {
+      // Expected to fail
+    }
+
+    const requestBodyLog = debugLogs.find(
+      (log) => Array.isArray(log) && log[0] === "[vertex-ai] requestBody:",
+    );
+    expect(requestBodyLog).toBeDefined();
+
+    if (requestBodyLog && Array.isArray(requestBodyLog)) {
+      const bodyJson = requestBodyLog[1] as string;
+      const body = JSON.parse(bodyJson);
+
+      // Verify functionCall is present
+      expect(body.contents[1].parts[0]).toHaveProperty("functionCall");
+      expect(body.contents[1].parts[0].functionCall.name).toBe("get_weather");
+
+      // Verify functionResponse is present
+      expect(body.contents[2].parts[0]).toHaveProperty("functionResponse");
+      expect(body.contents[2].parts[0].functionResponse.name).toBe("get_weather");
+    }
   });
 });

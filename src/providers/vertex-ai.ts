@@ -122,6 +122,55 @@ interface GoogleRequest {
 
 let toolCallCounter = 0;
 
+/**
+ * Redacts sensitive information from an object for safe logging.
+ * Creates a deep clone and replaces sensitive keys with "[REDACTED]".
+ */
+function redactSecrets(obj: unknown): unknown {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+
+  if (typeof obj !== "object") {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map((item) => redactSecrets(item));
+  }
+
+  const result: Record<string, unknown> = {};
+  const sensitiveKeys = ["key", "apiKey", "api_key", "token", "secret", "password"];
+
+  for (const [key, value] of Object.entries(obj)) {
+    const lowerKey = key.toLowerCase();
+    if (sensitiveKeys.some((sensitive) => lowerKey.includes(sensitive))) {
+      result[key] = "[REDACTED]";
+    } else {
+      result[key] = redactSecrets(value);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Creates a preview string from message content, truncated to maxLength.
+ */
+function getContentPreview(content: string | Array<{ type: string; text?: string }>, maxLength = 120): string {
+  if (typeof content === "string") {
+    return content.length > maxLength ? content.slice(0, maxLength) + "..." : content;
+  }
+
+  // For structured content, concatenate text parts
+  const textParts = content
+    .filter((block) => block.type === "text" && block.text)
+    .map((block) => block.text)
+    .join(" ");
+
+  return textParts.length > maxLength ? textParts.slice(0, maxLength) + "..." : textParts;
+}
+
 function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
   const contents: GoogleContent[] = [];
 
@@ -292,6 +341,20 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       const baseUrl =
         model.baseUrl || "https://aiplatform.googleapis.com/v1/publishers/google/models";
       const endpoint = `${baseUrl}/${model.id}:streamGenerateContent?key=${apiKey}&alt=sse`;
+
+      // Debug logging (opt-in via environment variable)
+      if (process.env.VERTEX_AI_DEBUG_PAYLOAD === "1") {
+        // Log context.messages summary
+        const messagesSummary = context.messages.map((msg) => ({
+          role: msg.role,
+          preview: getContentPreview(msg.content),
+        }));
+        console.debug("[vertex-ai] context.messages summary:", JSON.stringify(messagesSummary, null, 2));
+
+        // Log request body with secrets redacted
+        const redactedBody = redactSecrets(requestBody);
+        console.debug("[vertex-ai] requestBody:", JSON.stringify(redactedBody, null, 2));
+      }
 
       // Call onPayload if provided
       options?.onPayload?.(requestBody);
