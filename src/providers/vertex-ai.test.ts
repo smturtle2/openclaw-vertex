@@ -370,12 +370,12 @@ describe("vertex-ai request body format", () => {
 
 describe("vertex-ai debug logging", () => {
   const originalEnv = process.env.VERTEX_AI_DEBUG_PAYLOAD;
-  const originalDebug = console.debug;
+  const originalLog = console.log;
 
   afterEach(() => {
-    // Restore original environment and console.debug
+    // Restore original environment and console.log
     process.env.VERTEX_AI_DEBUG_PAYLOAD = originalEnv;
-    console.debug = originalDebug;
+    console.log = originalLog;
   });
 
   it("does not log when VERTEX_AI_DEBUG_PAYLOAD is not set", async () => {
@@ -386,9 +386,9 @@ describe("vertex-ai debug logging", () => {
       messages: [{ role: "user", content: "test message" }],
     };
 
-    const debugLogs: unknown[] = [];
-    console.debug = vi.fn((...args: unknown[]) => {
-      debugLogs.push(args);
+    const logCalls: unknown[] = [];
+    console.log = vi.fn((...args: unknown[]) => {
+      logCalls.push(args);
     });
 
     global.fetch = vi.fn(async () => {
@@ -404,7 +404,7 @@ describe("vertex-ai debug logging", () => {
       // Expected to fail
     }
 
-    expect(debugLogs).toHaveLength(0);
+    expect(logCalls).toHaveLength(0);
   });
 
   it("does not log when VERTEX_AI_DEBUG_PAYLOAD is set to '0'", async () => {
@@ -415,9 +415,9 @@ describe("vertex-ai debug logging", () => {
       messages: [{ role: "user", content: "test message" }],
     };
 
-    const debugLogs: unknown[] = [];
-    console.debug = vi.fn((...args: unknown[]) => {
-      debugLogs.push(args);
+    const logCalls: unknown[] = [];
+    console.log = vi.fn((...args: unknown[]) => {
+      logCalls.push(args);
     });
 
     global.fetch = vi.fn(async () => {
@@ -433,7 +433,7 @@ describe("vertex-ai debug logging", () => {
       // Expected to fail
     }
 
-    expect(debugLogs).toHaveLength(0);
+    expect(logCalls).toHaveLength(0);
   });
 
   it("logs context.messages summary and requestBody when VERTEX_AI_DEBUG_PAYLOAD is '1'", async () => {
@@ -463,9 +463,9 @@ describe("vertex-ai debug logging", () => {
       ],
     };
 
-    const debugLogs: unknown[] = [];
-    console.debug = vi.fn((...args: unknown[]) => {
-      debugLogs.push(args);
+    const logCalls: unknown[] = [];
+    console.log = vi.fn((...args: unknown[]) => {
+      logCalls.push(args);
     });
 
     global.fetch = vi.fn(async () => {
@@ -481,18 +481,18 @@ describe("vertex-ai debug logging", () => {
       // Expected to fail
     }
 
-    // Should have two debug calls: one for messages summary, one for requestBody
-    expect(debugLogs.length).toBeGreaterThanOrEqual(2);
+    // Should have two log calls: one for messages summary, one for requestBody
+    expect(logCalls.length).toBeGreaterThanOrEqual(2);
 
     // Check messages summary log
-    const messagesSummaryLog = debugLogs.find(
+    const messagesSummaryLog = logCalls.find(
       (log) => Array.isArray(log) && log[0] === "[vertex-ai] context.messages summary:",
     );
     expect(messagesSummaryLog).toBeDefined();
 
     // Check requestBody log
-    const requestBodyLog = debugLogs.find(
-      (log) => Array.isArray(log) && log[0] === "[vertex-ai] requestBody:",
+    const requestBodyLog = logCalls.find(
+      (log) => Array.isArray(log) && log[0] === "[vertex-ai] redacted requestBody:",
     );
     expect(requestBodyLog).toBeDefined();
   });
@@ -506,9 +506,9 @@ describe("vertex-ai debug logging", () => {
       messages: [{ role: "user", content: longMessage }],
     };
 
-    const debugLogs: unknown[] = [];
-    console.debug = vi.fn((...args: unknown[]) => {
-      debugLogs.push(args);
+    const logCalls: unknown[] = [];
+    console.log = vi.fn((...args: unknown[]) => {
+      logCalls.push(args);
     });
 
     global.fetch = vi.fn(async () => {
@@ -524,7 +524,7 @@ describe("vertex-ai debug logging", () => {
       // Expected to fail
     }
 
-    const messagesSummaryLog = debugLogs.find(
+    const messagesSummaryLog = logCalls.find(
       (log) => Array.isArray(log) && log[0] === "[vertex-ai] context.messages summary:",
     );
     expect(messagesSummaryLog).toBeDefined();
@@ -564,9 +564,9 @@ describe("vertex-ai debug logging", () => {
       ],
     };
 
-    const debugLogs: unknown[] = [];
-    console.debug = vi.fn((...args: unknown[]) => {
-      debugLogs.push(args);
+    const logCalls: unknown[] = [];
+    console.log = vi.fn((...args: unknown[]) => {
+      logCalls.push(args);
     });
 
     global.fetch = vi.fn(async () => {
@@ -582,8 +582,8 @@ describe("vertex-ai debug logging", () => {
       // Expected to fail
     }
 
-    const requestBodyLog = debugLogs.find(
-      (log) => Array.isArray(log) && log[0] === "[vertex-ai] requestBody:",
+    const requestBodyLog = logCalls.find(
+      (log) => Array.isArray(log) && log[0] === "[vertex-ai] redacted requestBody:",
     );
     expect(requestBodyLog).toBeDefined();
 

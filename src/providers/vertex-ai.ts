@@ -120,6 +120,9 @@ interface GoogleRequest {
   };
 }
 
+// Experimental toggle: when true, toolResult uses role "model"; when false, uses role "user"
+const FORCE_TOOLRESULT_AS_MODEL = true;
+
 let toolCallCounter = 0;
 
 /**
@@ -152,6 +155,14 @@ function redactSecrets(obj: unknown): unknown {
   }
 
   return result;
+}
+
+/**
+ * Creates a redacted clone of an object for safe logging.
+ * Wrapper around redactSecrets for convenience.
+ */
+function redactedClone(obj: unknown): unknown {
+  return redactSecrets(obj);
 }
 
 /**
@@ -225,9 +236,12 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
           });
         }
       }
-      // Vertex AI expects tool results with role "model" so they are visible to the model
+      // Use experimental toggle to control toolResult role
       if (parts.length > 0) {
-        contents.push({ role: "model", parts });
+        contents.push({
+          role: FORCE_TOOLRESULT_AS_MODEL ? "model" : "user",
+          parts,
+        });
       }
     }
   }
@@ -344,16 +358,21 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
 
       // Debug logging (opt-in via environment variable)
       if (process.env.VERTEX_AI_DEBUG_PAYLOAD === "1") {
-        // Log context.messages summary
-        const messagesSummary = context.messages.map((msg) => ({
-          role: msg.role,
-          preview: getContentPreview(msg.content),
-        }));
-        console.debug("[vertex-ai] context.messages summary:", JSON.stringify(messagesSummary, null, 2));
+        try {
+          // Log context.messages summary
+          const messagesSummary = context.messages.map((msg) => ({
+            role: msg.role,
+            preview: getContentPreview(msg.content),
+          }));
+          console.log("[vertex-ai] context.messages summary:", JSON.stringify(messagesSummary, null, 2));
 
-        // Log request body with secrets redacted
-        const redactedBody = redactSecrets(requestBody);
-        console.debug("[vertex-ai] requestBody:", JSON.stringify(redactedBody, null, 2));
+          // Log request body with secrets redacted
+          const redactedBody = redactedClone(requestBody);
+          console.log("[vertex-ai] redacted requestBody:", JSON.stringify(redactedBody, null, 2));
+        } catch (err) {
+          // Avoid interfering with runtime if logging fails
+          console.warn("[vertex-ai] debug logging failed:", err);
+        }
       }
 
       // Call onPayload if provided
