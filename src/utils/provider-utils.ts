@@ -17,7 +17,8 @@ export function isReasoningTagProvider(provider: string | undefined | null): boo
   if (
     normalized === "ollama" ||
     normalized === "google-gemini-cli" ||
-    normalized === "google-generative-ai"
+    normalized === "google-generative-ai" ||
+    normalized === "vertex-ai"
   ) {
     return true;
   }
