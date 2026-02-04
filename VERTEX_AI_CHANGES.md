@@ -2,7 +2,121 @@
 
 > **Note:** This file documents the Vertex AI provider improvements for stable tool-call id mapping and debug logging capabilities.
 
-## Latest Changes: Tool-Call ID Mapping (This PR)
+## Latest Changes: Comprehensive SSE Debug Logging (This PR)
+
+### Problem
+The Vertex AI provider had two critical debugging issues:
+
+1. **Empty responses with no tool calls** - The agent received empty responses from Vertex AI and the loop would restart without any tool execution, making it impossible to diagnose why no content was being generated.
+
+2. **Missing debug logging for SSE responses** - There was no visibility into what Vertex AI was actually returning in the SSE stream, making it impossible to debug issues.
+
+### Solution
+Added comprehensive always-on debug logging to capture the complete SSE response flow:
+
+1. **SSE chunk logging** - Every SSE chunk received from Vertex AI is now logged with full JSON details
+2. **finishReason logging** - Logs when the model indicates completion and why (STOP, MAX_TOKENS, SAFETY, etc.)
+3. **Empty response detection** - Warns when no content is generated, helping identify empty response issues
+4. **Stream completion logging** - Logs summary when stream ends, including content block count and stopReason
+5. **promptFeedback logging** - Logs safety blocks and other prompt-level feedback from the API
+
+### Implementation Details
+
+All logging is **always enabled** (no environment variables or debug flags required) using `console.log` and `console.warn`:
+
+#### 1. SSE Chunk Logging
+```typescript
+const chunk: GoogleResponse = JSON.parse(data);
+
+// Log each SSE chunk received
+console.log("[vertex-ai] SSE chunk received:", JSON.stringify(chunk, null, 2));
+```
+
+#### 2. Prompt Feedback Logging
+```typescript
+// Log promptFeedback if present (can indicate safety blocks)
+if (chunk.promptFeedback) {
+  console.log("[vertex-ai] promptFeedback:", JSON.stringify(chunk.promptFeedback, null, 2));
+}
+```
+
+#### 3. Finish Reason Logging
+```typescript
+if (candidate?.finishReason) {
+  console.log(`[vertex-ai] finishReason: ${candidate.finishReason}`);
+  output.stopReason = mapStopReason(candidate.finishReason);
+  // ... existing code
+}
+```
+
+#### 4. Stream Completion and Empty Response Detection
+```typescript
+// Log stream completion
+console.log(`[vertex-ai] Stream completed. Content blocks: ${output.content.length}, stopReason: ${output.stopReason}`);
+
+// Warn if no content was generated
+if (output.content.length === 0) {
+  console.warn("[vertex-ai] Warning: No content generated in response");
+}
+```
+
+### Example Output
+
+When a request is made, you'll now see comprehensive logging like:
+
+```
+[vertex-ai] streamVertexAI entered — model: gemini-3-flash-preview
+[vertex-ai] context.messages summary: [...]
+[vertex-ai] redacted requestBody: {...}
+[vertex-ai] SSE chunk received: {
+  "candidates": [{
+    "content": {
+      "parts": [{"text": "Hello, how can I help?"}]
+    }
+  }]
+}
+[vertex-ai] SSE chunk received: {
+  "candidates": [{
+    "finishReason": "STOP"
+  }],
+  "usageMetadata": {...}
+}
+[vertex-ai] finishReason: STOP
+[vertex-ai] Stream completed. Content blocks: 1, stopReason: stop
+```
+
+For empty responses (the original problem):
+```
+[vertex-ai] streamVertexAI entered — model: gemini-3-flash-preview
+[vertex-ai] SSE chunk received: {"candidates": []}
+[vertex-ai] Stream completed. Content blocks: 0, stopReason: stop
+[vertex-ai] Warning: No content generated in response
+```
+
+For safety blocks:
+```
+[vertex-ai] promptFeedback: {
+  "blockReason": "SAFETY",
+  "safetyRatings": [...]
+}
+```
+
+### Testing
+All 15 existing tests pass with the new logging:
+```bash
+npx vitest run --config vitest.unit.config.ts src/providers/vertex-ai.test.ts
+```
+
+### Impact
+- **Debugging**: Full visibility into SSE stream responses
+- **Empty response detection**: Clear warnings when no content is generated
+- **Safety block visibility**: Can now see when requests are blocked for safety reasons
+- **Non-breaking**: All logging is additive and doesn't affect functionality
+- **Always-on**: No flags or environment variables needed - logging is always active
+
+---
+
+## Previous Changes: Tool-Call ID Mapping
 
 ### Problem
 The Vertex AI provider had an intermittent tool-call flow issue:
