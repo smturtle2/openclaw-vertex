@@ -340,6 +340,7 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
                 if (part.text !== undefined) {
                   // End previous block if it's thinking
                   if (currentBlock !== null) {
+                    // @ts-expect-error - TypeScript doesn't narrow properly in nested conditions
                     if (currentBlock.type === "thinking") {
                       stream.push({
                         type: "thinking_end",
@@ -381,6 +382,7 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
                         content: (currentBlock as TextContent).text,
                         partial: output,
                       });
+                      // @ts-expect-error - TypeScript doesn't narrow properly after previous check
                     } else if (currentBlock.type === "thinking") {
                       stream.push({
                         type: "thinking_end",
@@ -452,6 +454,7 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
             content: (currentBlock as TextContent).text,
             partial: output,
           });
+          // @ts-expect-error - TypeScript doesn't narrow properly after previous check
         } else if (currentBlock.type === "thinking") {
           stream.push({
             type: "thinking_end",
