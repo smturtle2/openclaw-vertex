@@ -9,13 +9,29 @@ Use Google Cloud Vertex AI to access Gemini 3 models.
 
 ## Quick start
 
-1. Set your API key:
+1. Get an API key from Google Cloud Console
+
+2. Set your API key:
 
 ```bash
 export VERTEX_AI_API_KEY="your-api-key"
 ```
 
-2. Configure with your GCP project ID in the baseUrl:
+3. Configure OpenClaw:
+
+```json5
+{
+  agents: {
+    defaults: {
+      model: { primary: "vertex-ai/gemini-3-flash-preview" },
+    },
+  },
+}
+```
+
+Or run `openclaw onboard` and select Vertex AI.
+
+## Configuration example
 
 ```json5
 {
@@ -27,7 +43,7 @@ export VERTEX_AI_API_KEY="your-api-key"
   models: {
     providers: {
       "vertex-ai": {
-        baseUrl: "https://aiplatform.googleapis.com/v1/projects/YOUR_PROJECT_ID/locations/global/publishers/google/models",
+        baseUrl: "https://aiplatform.googleapis.com/v1/publishers/google/models",
         apiKey: "${VERTEX_AI_API_KEY}",
         api: "google-generative-ai",
         models: [
@@ -56,8 +72,7 @@ export VERTEX_AI_API_KEY="your-api-key"
 }
 ```
 
-## Important notes
+## Notes
 
-- Vertex AI Gemini 3 preview models are only available via the **global endpoint** (not regional endpoints)
-- Replace `YOUR_PROJECT_ID` with your actual GCP project ID in the baseUrl
-- You can get an API key from the Google Cloud Console
+- Only the global endpoint is supported for Gemini 3 preview models
+- API key authentication - no GCP project ID required

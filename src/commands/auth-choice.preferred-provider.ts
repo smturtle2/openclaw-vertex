@@ -31,6 +31,7 @@ const PREFERRED_PROVIDER_BY_AUTH_CHOICE: Partial<Record<AuthChoice, string>> = {
   "opencode-zen": "opencode",
   "qwen-portal": "qwen-portal",
   "minimax-portal": "minimax-portal",
+  "vertex-ai-api-key": "vertex-ai",
 };
 
 export function resolvePreferredProviderForAuthChoice(choice: AuthChoice): string | undefined {

@@ -21,7 +21,8 @@ export type AuthChoiceGroupId =
   | "minimax"
   | "synthetic"
   | "venice"
-  | "qwen";
+  | "qwen"
+  | "vertex-ai";
 
 export type AuthChoiceGroup = {
   value: AuthChoiceGroupId;
@@ -120,6 +121,12 @@ const AUTH_CHOICE_GROUP_DEFS: {
     hint: "Privacy-focused (uncensored models)",
     choices: ["venice-api-key"],
   },
+  {
+    value: "vertex-ai",
+    label: "Google Vertex AI",
+    hint: "GCP Vertex AI (Gemini 3 preview)",
+    choices: ["vertex-ai-api-key"],
+  },
 ];
 
 export function buildAuthChoiceOptions(params: {
@@ -205,6 +212,11 @@ export function buildAuthChoiceOptions(params: {
     value: "minimax-api-lightning",
     label: "MiniMax M2.1 Lightning",
     hint: "Faster, higher output cost",
+  });
+  options.push({
+    value: "vertex-ai-api-key",
+    label: "Google Vertex AI API key",
+    hint: "GCP Vertex AI (Gemini 3 preview models)",
   });
   if (params.includeSkip) {
     options.push({ value: "skip", label: "Skip for now" });
