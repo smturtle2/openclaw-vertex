@@ -14,10 +14,15 @@ import type {
   SimpleStreamOptions,
   StreamFunction,
   StreamOptions,
+  TextContent,
+  ThinkingContent,
+  ToolCall,
 } from "@mariozechner/pi-ai";
-import { AssistantMessageEventStream } from "@mariozechner/pi-ai";
-import { getEnvApiKey } from "@mariozechner/pi-ai";
-import { calculateCost } from "@mariozechner/pi-ai";
+import {
+  calculateCost,
+  createAssistantMessageEventStream,
+  getEnvApiKey,
+} from "@mariozechner/pi-ai";
 
 interface VertexAIOptions extends StreamOptions {
   toolChoice?: "auto" | "none" | "any";
@@ -117,16 +122,21 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
   for (const msg of context.messages) {
     if (msg.role === "user") {
       const parts: GooglePart[] = [];
-      for (const block of msg.content) {
-        if (block.type === "text") {
-          parts.push({ text: block.text });
-        } else if (block.type === "image") {
-          parts.push({
-            inlineData: {
-              mimeType: block.mimeType || "image/jpeg",
-              data: block.data,
-            },
-          });
+      const content = msg.content;
+      if (typeof content === "string") {
+        parts.push({ text: content });
+      } else {
+        for (const block of content) {
+          if (block.type === "text") {
+            parts.push({ text: block.text });
+          } else if (block.type === "image") {
+            parts.push({
+              inlineData: {
+                mimeType: block.mimeType || "image/jpeg",
+                data: block.data,
+              },
+            });
+          }
         }
       }
       contents.push({ role: "user", parts });
@@ -148,14 +158,14 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
       if (parts.length > 0) {
         contents.push({ role: "model", parts });
       }
-    } else if (msg.role === "tool") {
+    } else if (msg.role === "toolResult") {
       const parts: GooglePart[] = [];
       for (const block of msg.content) {
-        if (block.type === "toolResult") {
+        if (block.type === "text") {
           parts.push({
             functionResponse: {
-              name: block.name,
-              response: { result: block.result },
+              name: msg.toolName,
+              response: { result: block.text },
             },
           });
         }
@@ -191,9 +201,8 @@ function mapStopReason(finishReason?: string): AssistantMessage["stopReason"] {
     case "MAX_TOKENS":
       return "length";
     case "SAFETY":
-      return "contentFilter";
     case "RECITATION":
-      return "contentFilter";
+      return "error";
     default:
       return "stop";
   }
@@ -204,7 +213,7 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
   context,
   options,
 ) => {
-  const stream = new AssistantMessageEventStream();
+  const stream = createAssistantMessageEventStream();
 
   (async () => {
     const output: AssistantMessage = {
@@ -305,10 +314,7 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let currentBlock:
-        | { type: "text"; text: string }
-        | { type: "thinking"; thinking: string }
-        | null = null;
+      let currentBlock: TextContent | ThinkingContent | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -332,15 +338,20 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
             if (candidate?.content?.parts) {
               for (const part of candidate.content.parts) {
                 if (part.text !== undefined) {
-                  if (!currentBlock || currentBlock.type !== "text") {
-                    if (currentBlock) {
+                  // End previous block if it's thinking
+                  if (currentBlock !== null) {
+                    if (currentBlock.type === "thinking") {
                       stream.push({
                         type: "thinking_end",
                         contentIndex: output.content.length - 1,
-                        content: currentBlock.thinking,
+                        content: (currentBlock as ThinkingContent).thinking,
                         partial: output,
                       });
+                      currentBlock = null;
                     }
+                  }
+                  // Start new text block if needed
+                  if (currentBlock === null) {
                     currentBlock = { type: "text", text: "" };
                     output.content.push(currentBlock);
                     stream.push({
@@ -349,29 +360,32 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
                       partial: output,
                     });
                   }
-                  currentBlock.text += part.text;
-                  stream.push({
-                    type: "text_delta",
-                    contentIndex: output.content.length - 1,
-                    delta: part.text,
-                    partial: output,
-                  });
+                  // Append text to current block
+                  if (currentBlock.type === "text") {
+                    (currentBlock as TextContent).text += part.text;
+                    stream.push({
+                      type: "text_delta",
+                      contentIndex: output.content.length - 1,
+                      delta: part.text,
+                      partial: output,
+                    });
+                  }
                 }
 
                 if (part.functionCall) {
-                  if (currentBlock) {
+                  if (currentBlock !== null) {
                     if (currentBlock.type === "text") {
                       stream.push({
                         type: "text_end",
                         contentIndex: output.content.length - 1,
-                        content: currentBlock.text,
+                        content: (currentBlock as TextContent).text,
                         partial: output,
                       });
-                    } else {
+                    } else if (currentBlock.type === "thinking") {
                       stream.push({
                         type: "thinking_end",
                         contentIndex: output.content.length - 1,
-                        content: currentBlock.thinking,
+                        content: (currentBlock as ThinkingContent).thinking,
                         partial: output,
                       });
                     }
@@ -381,8 +395,8 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
                   const toolCallId =
                     part.functionCall.id ||
                     `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`;
-                  const toolCall = {
-                    type: "toolCall" as const,
+                  const toolCall: ToolCall = {
+                    type: "toolCall",
                     id: toolCallId,
                     name: part.functionCall.name,
                     arguments: part.functionCall.args ?? {},
@@ -430,30 +444,47 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
       }
 
       // End any remaining block
-      if (currentBlock) {
+      if (currentBlock !== null) {
         if (currentBlock.type === "text") {
           stream.push({
             type: "text_end",
             contentIndex: output.content.length - 1,
-            content: currentBlock.text,
+            content: (currentBlock as TextContent).text,
             partial: output,
           });
-        } else {
+        } else if (currentBlock.type === "thinking") {
           stream.push({
             type: "thinking_end",
             contentIndex: output.content.length - 1,
-            content: currentBlock.thinking,
+            content: (currentBlock as ThinkingContent).thinking,
             partial: output,
           });
         }
       }
 
-      stream.push({ type: "end", message: output });
+      // Send done event only if stopReason is not error/aborted
+      if (
+        output.stopReason === "stop" ||
+        output.stopReason === "length" ||
+        output.stopReason === "toolUse"
+      ) {
+        stream.push({ type: "done", reason: output.stopReason, message: output });
+      } else {
+        stream.push({
+          type: "error",
+          reason: output.stopReason,
+          error: { ...output },
+        });
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      stream.push({ type: "error", error: errorMessage });
+      stream.push({
+        type: "error",
+        reason: "error",
+        error: { ...output, errorMessage, stopReason: "error" },
+      });
     } finally {
-      stream.close();
+      stream.end(output);
     }
   })();
 
