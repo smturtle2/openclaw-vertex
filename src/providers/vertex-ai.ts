@@ -443,6 +443,15 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
 
           try {
             const chunk: GoogleResponse = JSON.parse(data);
+            
+            // Log each SSE chunk received
+            console.log("[vertex-ai] SSE chunk received:", JSON.stringify(chunk, null, 2));
+            
+            // Log promptFeedback if present (can indicate safety blocks)
+            if (chunk.promptFeedback) {
+              console.log("[vertex-ai] promptFeedback:", JSON.stringify(chunk.promptFeedback, null, 2));
+            }
+            
             const candidate = chunk.candidates?.[0];
 
             if (candidate?.content?.parts) {
@@ -553,6 +562,7 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
             }
 
             if (candidate?.finishReason) {
+              console.log(`[vertex-ai] finishReason: ${candidate.finishReason}`);
               output.stopReason = mapStopReason(candidate.finishReason);
               if (output.content.some((b) => b.type === "toolCall")) {
                 output.stopReason = "toolUse";
@@ -589,6 +599,14 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
             partial: output,
           });
         }
+      }
+
+      // Log stream completion
+      console.log(`[vertex-ai] Stream completed. Content blocks: ${output.content.length}, stopReason: ${output.stopReason}`);
+      
+      // Warn if no content was generated
+      if (output.content.length === 0) {
+        console.warn("[vertex-ai] Warning: No content generated in response");
       }
 
       // Send done event only if stopReason is not error/aborted
