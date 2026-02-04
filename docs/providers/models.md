@@ -44,6 +44,7 @@ See [Venice AI](/providers/venice).
 - [GLM models](/providers/glm)
 - [MiniMax](/providers/minimax)
 - [Venice (Venice AI)](/providers/venice)
+- [GCP Vertex AI](/providers/vertex-ai)
 - [Amazon Bedrock](/bedrock)
 
 For the full provider catalog (xAI, Groq, Mistral, etc.) and advanced configuration,
