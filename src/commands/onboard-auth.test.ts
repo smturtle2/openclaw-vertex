@@ -13,6 +13,8 @@ import {
   applyOpenrouterProviderConfig,
   applySyntheticConfig,
   applySyntheticProviderConfig,
+  applyVertexAiConfig,
+  applyVertexAiProviderConfig,
   applyXiaomiConfig,
   applyXiaomiProviderConfig,
   OPENROUTER_DEFAULT_MODEL_REF,
@@ -464,5 +466,72 @@ describe("applyOpenrouterConfig", () => {
       },
     });
     expect(cfg.agents?.defaults?.model?.fallbacks).toEqual(["anthropic/claude-opus-4-5"]);
+  });
+});
+
+describe("applyVertexAiConfig", () => {
+  it("adds Vertex AI provider with correct settings", () => {
+    const cfg = applyVertexAiConfig({});
+    expect(cfg.agents?.defaults?.model?.primary).toBe("vertex-ai/gemini-3-flash-preview");
+  });
+
+  it("merges Vertex AI models and keeps existing provider overrides", () => {
+    const cfg = applyVertexAiProviderConfig({
+      models: {
+        providers: {
+          "vertex-ai": {
+            baseUrl: "https://old.example.com",
+            apiKey: "old-key",
+            api: "google-generative-ai",
+            models: [
+              {
+                id: "custom-model",
+                name: "Custom",
+                reasoning: false,
+                input: ["text"],
+                cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+                contextWindow: 1000,
+                maxTokens: 100,
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(cfg.models?.providers?.["vertex-ai"]?.baseUrl).toBe(
+      "https://aiplatform.googleapis.com/v1/publishers/google/models",
+    );
+    expect(cfg.models?.providers?.["vertex-ai"]?.api).toBe("google-generative-ai");
+    expect(cfg.models?.providers?.["vertex-ai"]?.apiKey).toBe("old-key");
+    expect(cfg.models?.providers?.["vertex-ai"]?.models.map((m) => m.id)).toContain("custom-model");
+    expect(cfg.models?.providers?.["vertex-ai"]?.models.map((m) => m.id)).toContain(
+      "gemini-3-flash-preview",
+    );
+    expect(cfg.models?.providers?.["vertex-ai"]?.models.map((m) => m.id)).toContain(
+      "gemini-3-pro-preview",
+    );
+  });
+
+  it("preserves existing alias for the default model", () => {
+    const cfg = applyVertexAiProviderConfig({
+      agents: {
+        defaults: {
+          models: {
+            "vertex-ai/gemini-3-flash-preview": { alias: "Vertex" },
+          },
+        },
+      },
+    });
+    expect(cfg.agents?.defaults?.models?.["vertex-ai/gemini-3-flash-preview"]?.alias).toBe(
+      "Vertex",
+    );
+  });
+
+  it("sets default alias when not present", () => {
+    const cfg = applyVertexAiProviderConfig({});
+    expect(cfg.agents?.defaults?.models?.["vertex-ai/gemini-3-flash-preview"]?.alias).toBe(
+      "Vertex AI",
+    );
   });
 });
