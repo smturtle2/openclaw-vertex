@@ -1,8 +1,103 @@
-# Vertex AI Provider Debug Logging and Experimental Toggle
+# Vertex AI Provider Tool-Call Flow Fix and Debug Logging
 
-> **Note:** This is temporary documentation for the experimental toggle feature. Once the experiment is complete and the optimal behavior is determined, this file may be removed or moved to the docs/ directory.
+> **Note:** This file documents the Vertex AI provider improvements for stable tool-call id mapping and debug logging capabilities.
 
-## Summary of Changes
+## Latest Changes: Tool-Call ID Mapping (This PR)
+
+### Problem
+The Vertex AI provider had an intermittent tool-call flow issue:
+- Vertex AI rejects `function_call.id` in request payloads at the top level
+- The runtime lost stable mapping between assistant toolCall ids and incoming function_call responses
+- This caused runs to succeed once but fail when multiple tools were used in sequence
+
+### Solution
+We stabilized the toolCall id mapping by:
+1. **Injecting** the internal assistant toolCall id into function call arguments using `__openclaw_tool_call_id` marker
+2. **Parsing** incoming SSE responses to prefer the echoed internal id
+3. **Cleaning** arguments by removing the internal marker before passing to tool execution
+4. **Logging** the flow to make debugging visible
+
+### Implementation Details
+
+#### 1. Outgoing Function Calls
+When converting assistant messages to Google format, we inject the internal id:
+
+```typescript
+else if (block.type === "toolCall") {
+  const args = { ...block.arguments };
+  if (block.id) {
+    args.__openclaw_tool_call_id = block.id;
+  }
+  parts.push({
+    functionCall: {
+      name: block.name,
+      args,  // Contains the marker
+    },
+  });
+}
+```
+
+#### 2. Incoming SSE Responses
+When parsing functionCall from Vertex SSE responses, we prioritize the echoed id:
+
+```typescript
+const args = part.functionCall.args ?? {};
+const echoedId = args.__openclaw_tool_call_id as string | undefined;
+const serverId = part.functionCall.id;
+const toolCallId = echoedId || serverId || `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`;
+
+// Remove marker before creating ToolCall
+const cleanArgs = { ...args };
+delete cleanArgs.__openclaw_tool_call_id;
+```
+
+#### 3. Debug Logging
+Added three debug log points (enabled via `VERTEX_AI_DEBUG_PAYLOAD=1`):
+
+1. **Entry point**: Logs when streamVertexAI is entered
+   ```
+   [vertex-ai] streamVertexAI entered — model: gemini-3-flash-preview
+   ```
+
+2. **Outgoing injection**: Logs when injecting internal id into args
+   ```
+   [vertex-ai] outgoing toolCall — injecting id: call_123 into functionCall.args for get_weather
+   ```
+
+3. **Incoming resolution**: Logs the id resolution process
+   ```
+   [vertex-ai] functionCall received — name: get_weather, echoedId: call_123, serverId: (none), resolved: call_123
+   ```
+
+### Testing
+
+#### Unit Tests
+All 16 tests pass, including 3 new tests for:
+- Echoed id preference over server id
+- Server id fallback when no echoed id
+- ID synthesis when neither id is present
+
+Run tests with:
+```bash
+npx vitest run --config vitest.unit.config.ts src/providers/vertex-ai.test.ts
+```
+
+#### Manual Testing
+A manual test script demonstrates:
+- ✓ Original id preserved through round-trip
+- ✓ Server id ignored when echoed id present
+- ✓ Marker removed from arguments
+- ✓ Tool execution sees clean arguments
+
+### Impact
+- **Stability**: Sequential tool calls now work reliably
+- **Debugging**: Clear log trail for tool call id resolution
+- **Correctness**: Tools receive clean arguments without internal markers
+- **Non-breaking**: Existing behavior preserved, only stabilizes id mapping
+
+---
+
+## Previous Changes: Debug Logging and Experimental Toggle
 
 This PR adds experimental debug logging and a toggle to control the role used for tool results in the Vertex AI provider (`src/providers/vertex-ai.ts`).
 
