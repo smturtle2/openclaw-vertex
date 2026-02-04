@@ -39,6 +39,7 @@ interface GooglePart {
   functionCall?: {
     name: string;
     args?: Record<string, unknown>;
+    // Note: id is not sent in requests but may be present in responses
     id?: string;
   };
   functionResponse?: {
@@ -52,7 +53,8 @@ interface GooglePart {
 }
 
 interface GoogleContent {
-  role: "user" | "model" | "function";
+  // Vertex AI only accepts "user" and "model" roles in contents
+  role: "user" | "model";
   parts: GooglePart[];
 }
 
@@ -146,11 +148,11 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
         if (block.type === "text") {
           parts.push({ text: block.text });
         } else if (block.type === "toolCall") {
+          // Vertex AI does not accept id field in functionCall
           parts.push({
             functionCall: {
               name: block.name,
               args: block.arguments,
-              id: block.id,
             },
           });
         }
@@ -170,8 +172,9 @@ function convertMessagesToGoogleFormat(context: Context): GoogleContent[] {
           });
         }
       }
+      // Vertex AI expects tool results with role "user" (not "function")
       if (parts.length > 0) {
-        contents.push({ role: "function", parts });
+        contents.push({ role: "user", parts });
       }
     }
   }
@@ -343,7 +346,6 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
                 if (part.text !== undefined) {
                   // End previous block if it's thinking
                   if (currentBlock !== null) {
-                    // @ts-expect-error - TypeScript doesn't narrow properly in nested conditions
                     if (currentBlock.type === "thinking") {
                       stream.push({
                         type: "thinking_end",
@@ -385,7 +387,6 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
                         content: (currentBlock as TextContent).text,
                         partial: output,
                       });
-                      // @ts-expect-error - TypeScript doesn't narrow properly after previous check
                     } else if (currentBlock.type === "thinking") {
                       stream.push({
                         type: "thinking_end",
@@ -457,7 +458,6 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
             content: (currentBlock as TextContent).text,
             partial: output,
           });
-          // @ts-expect-error - TypeScript doesn't narrow properly after previous check
         } else if (currentBlock.type === "thinking") {
           stream.push({
             type: "thinking_end",

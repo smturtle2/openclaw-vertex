@@ -248,4 +248,122 @@ describe("vertex-ai request body format", () => {
       },
     ]);
   });
+
+  it("formats tool calls without id field in functionCall", async () => {
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [
+        { role: "user", content: "What's the weather in NYC?" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call_123",
+              name: "get_weather",
+              arguments: { location: "NYC" },
+            },
+          ],
+        },
+      ],
+    };
+
+    let capturedBody: unknown = null;
+
+    global.fetch = vi.fn(async (_url, options) => {
+      if (options?.body) {
+        capturedBody = JSON.parse(options.body.toString());
+      }
+      return new Response(null, { status: 400 });
+    }) as typeof fetch;
+
+    try {
+      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      for await (const _event of stream) {
+        // Just consume events until error
+      }
+    } catch {
+      // Expected to fail
+    }
+
+    // Verify functionCall does not contain id field
+    expect(capturedBody).toBeDefined();
+    expect((capturedBody as any).contents).toEqual([
+      { role: "user", parts: [{ text: "What's the weather in NYC?" }] },
+      {
+        role: "model",
+        parts: [
+          {
+            functionCall: {
+              name: "get_weather",
+              args: { location: "NYC" },
+              // id should NOT be present
+            },
+          },
+        ],
+      },
+    ]);
+    // Explicitly verify id is not in the functionCall
+    expect((capturedBody as any).contents[1].parts[0].functionCall).not.toHaveProperty("id");
+  });
+
+  it("formats tool results with role 'user' (not 'function')", async () => {
+    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const context: Context = {
+      messages: [
+        { role: "user", content: "What's the weather in NYC?" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call_123",
+              name: "get_weather",
+              arguments: { location: "NYC" },
+            },
+          ],
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call_123",
+          toolName: "get_weather",
+          content: [{ type: "text", text: "Sunny, 75°F" }],
+        },
+      ],
+    };
+
+    let capturedBody: unknown = null;
+
+    global.fetch = vi.fn(async (_url, options) => {
+      if (options?.body) {
+        capturedBody = JSON.parse(options.body.toString());
+      }
+      return new Response(null, { status: 400 });
+    }) as typeof fetch;
+
+    try {
+      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      for await (const _event of stream) {
+        // Just consume events until error
+      }
+    } catch {
+      // Expected to fail
+    }
+
+    // Verify tool result uses role "user" not "function"
+    expect(capturedBody).toBeDefined();
+    const contents = (capturedBody as any).contents;
+    expect(contents).toHaveLength(3);
+    expect(contents[2]).toEqual({
+      role: "user", // Should be "user" not "function"
+      parts: [
+        {
+          functionResponse: {
+            name: "get_weather",
+            response: { result: "Sunny, 75°F" },
+          },
+        },
+      ],
+    });
+  });
 });
