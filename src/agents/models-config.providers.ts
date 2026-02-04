@@ -415,7 +415,7 @@ async function buildOllamaProvider(): Promise<ProviderConfig> {
 function buildVertexAiProvider(): ProviderConfig {
   return {
     baseUrl: "https://aiplatform.googleapis.com/v1/publishers/google/models",
-    api: "google-generative-ai",
+    api: "vertex-ai",
     models: [
       {
         id: "gemini-3-flash-preview",

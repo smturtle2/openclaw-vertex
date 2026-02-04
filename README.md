@@ -22,9 +22,9 @@
 
 ## ⚠️ Fork Notice / 포크 알림
 
-**English:** This is a fork of [OpenClaw](https://github.com/openclaw/openclaw) with **Google Cloud Vertex AI support** for Gemini 3 models. Since this is not published to npm, you must **build from source**. See [Installation (This Fork)](#installation-this-fork) below.
+**English:** This is a fork of [OpenClaw](https://github.com/openclaw/openclaw) with **Google Cloud Vertex AI support** for Gemini 3 models. Since this is not published to npm, you must **build from source** (including `pnpm build` and `pnpm ui:build`). See [Installation (This Fork)](#installation-this-fork) below.
 
-**한국어:** 이 저장소는 **Google Cloud Vertex AI 지원**이 추가된 [OpenClaw](https://github.com/openclaw/openclaw)의 포크입니다. npm에 배포되지 않았으므로 **소스에서 직접 빌드**해야 합니다. 아래 [설치 방법 (이 포크)](#installation-this-fork)을 참고하세요.
+**한국어:** 이 저장소는 **Google Cloud Vertex AI 지원**이 추가된 [OpenClaw](https://github.com/openclaw/openclaw)의 포크입니다. npm에 배포되지 않았으므로 **소스에서 직접 빌드**해야 합니다 (`pnpm build` 및 `pnpm ui:build` 포함). 아래 [설치 방법 (이 포크)](#installation-this-fork)을 참고하세요.
 
 **Key Feature:** Access Gemini 3 models (`gemini-3-flash-preview`, `gemini-3-pro-preview`) via Vertex AI API key authentication (no GCP project ID required). See [docs/providers/vertex-ai.md](docs/providers/vertex-ai.md) for details.
 
@@ -70,8 +70,9 @@ cd openclaw-vertex
 # Install dependencies
 pnpm install
 
-# Build the project
+# Build the project (includes UI build)
 pnpm build
+pnpm ui:build
 
 # Run onboarding wizard
 pnpm openclaw onboard --install-daemon
@@ -94,6 +95,7 @@ pnpm openclaw onboard --install-daemon
    cd openclaw-vertex
    pnpm install
    pnpm build
+   pnpm ui:build
    ```
 
 3. **Configure Vertex AI (optional):**
@@ -126,6 +128,37 @@ pnpm gateway:watch
 pnpm openclaw agent --message "Hello"
 ```
 
+### Cleaning Build Artifacts
+
+To clean build artifacts and start fresh:
+
+```bash
+# Remove build outputs
+rm -rf dist/
+
+# Remove UI build outputs
+rm -rf ui/dist/
+
+# Then rebuild
+pnpm install
+pnpm build
+pnpm ui:build
+```
+
+**Korean / 한국어:**
+```bash
+# 빌드 결과물 삭제
+rm -rf dist/
+
+# UI 빌드 결과물 삭제
+rm -rf ui/dist/
+
+# 재빌드
+pnpm install
+pnpm build
+pnpm ui:build
+```
+
 ### Troubleshooting
 
 - **Build errors:** Make sure you have Node ≥22 and pnpm installed
@@ -139,6 +172,15 @@ cd openclaw-vertex
 git pull origin main
 pnpm install
 pnpm build
+pnpm ui:build
+```
+
+If you encounter issues after updating, clean and rebuild:
+```bash
+rm -rf dist/ ui/dist/
+pnpm install
+pnpm build
+pnpm ui:build
 ```
 
 ## Install (Official OpenClaw - npm)
