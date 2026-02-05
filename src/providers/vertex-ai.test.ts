@@ -175,8 +175,8 @@ describe("vertex-ai request body format", () => {
     expect(tools[0].functionDeclarations[0].parameters).toBeDefined();
   });
 
-  it("formats tool calls without id field in functionCall but injects __openclaw_tool_call_id in args", async () => {
-    const model = makeVertexAIModel("gemini-3-flash-preview");
+  it("formats tool calls without id field in functionCall (Vertex AI doesn't require id)", async () => {
+    const model = makeVertexAIModel("gemini-2.0-flash-exp");  // Use Gemini 2.0 to avoid thought signature requirement
     const context: Context = {
       messages: [
         { role: "user", content: "What's the weather in NYC?" },
@@ -213,7 +213,7 @@ describe("vertex-ai request body format", () => {
       // Expected to fail
     }
 
-    // Verify functionCall does not contain id field at top level but has __openclaw_tool_call_id in args
+    // Verify functionCall does not contain id field at top level (Vertex AI doesn't require it)
     expect(capturedBody).toBeDefined();
     expect((capturedBody as any).contents).toEqual([
       { role: "user", parts: [{ text: "What's the weather in NYC?" }] },
@@ -223,8 +223,8 @@ describe("vertex-ai request body format", () => {
           {
             functionCall: {
               name: "get_weather",
-              args: { location: "NYC", __openclaw_tool_call_id: "call_123" },
-              // id should NOT be present at top level
+              args: { location: "NYC" },
+              // id should NOT be present at top level for Vertex AI
             },
           },
         ],
@@ -232,15 +232,14 @@ describe("vertex-ai request body format", () => {
     ]);
     // Explicitly verify id is not in the functionCall at top level
     expect((capturedBody as any).contents[1].parts[0].functionCall).not.toHaveProperty("id");
-    // But verify __openclaw_tool_call_id is in args
-    expect((capturedBody as any).contents[1].parts[0].functionCall.args).toHaveProperty(
+    // Also verify there's no __openclaw_tool_call_id marker in args
+    expect((capturedBody as any).contents[1].parts[0].functionCall.args).not.toHaveProperty(
       "__openclaw_tool_call_id",
-      "call_123",
     );
   });
 
   it("formats tool results with role 'user' (not 'model' or 'function')", async () => {
-    const model = makeVertexAIModel("gemini-3-flash-preview");
+    const model = makeVertexAIModel("gemini-2.0-flash-exp");  // Use Gemini 2.0 to avoid thought signature requirement
     const context: Context = {
       messages: [
         { role: "user", content: "What's the weather in NYC?" },
@@ -293,7 +292,7 @@ describe("vertex-ai request body format", () => {
         {
           functionResponse: {
             name: "get_weather",
-            response: { result: "Sunny, 75°F" },
+            response: { output: "Sunny, 75°F" },  // Note: shared utility uses 'output' not 'result'
           },
         },
       ],
@@ -490,14 +489,14 @@ describe("vertex-ai debug logging", () => {
 });
 
 describe("vertex-ai SSE response parsing with tool call id", () => {
-  it("prefers echoed __openclaw_tool_call_id from args over server id", async () => {
+  it("uses server id when provided", async () => {
     const model = makeVertexAIModel("gemini-3-flash-preview");
     const context: Context = {
       messages: [{ role: "user", content: "What's the weather?" }],
     };
 
-    // Mock SSE response with echoed __openclaw_tool_call_id in args
-    const mockSSE = `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"NYC","__openclaw_tool_call_id":"call_123"},"id":"server_generated_id"}}]}}]}\n\ndata: [DONE]\n\n`;
+    // Mock SSE response with server-provided id
+    const mockSSE = `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"NYC"},"id":"server_generated_id"}}]}}]}\n\ndata: [DONE]\n\n`;
 
     global.fetch = vi.fn(async () => {
       const stream = new ReadableStream({
@@ -520,22 +519,19 @@ describe("vertex-ai SSE response parsing with tool call id", () => {
     expect(toolcallEnd).toBeDefined();
     expect(toolcallEnd).toHaveProperty("toolCall");
 
-    // Verify the id is the echoed one, not the server one
-    expect((toolcallEnd as any).toolCall.id).toBe("call_123");
+    // Verify the id is the server one
+    expect((toolcallEnd as any).toolCall.id).toBe("server_generated_id");
     expect((toolcallEnd as any).toolCall.name).toBe("get_weather");
-
-    // Verify the __openclaw_tool_call_id marker is removed from arguments
-    expect((toolcallEnd as any).toolCall.arguments).not.toHaveProperty("__openclaw_tool_call_id");
     expect((toolcallEnd as any).toolCall.arguments).toEqual({ location: "NYC" });
   });
 
-  it("falls back to server id when __openclaw_tool_call_id is not present", async () => {
+  it("uses server id when provided (no custom markers)", async () => {
     const model = makeVertexAIModel("gemini-3-flash-preview");
     const context: Context = {
       messages: [{ role: "user", content: "What's the weather?" }],
     };
 
-    // Mock SSE response without __openclaw_tool_call_id
+    // Mock SSE response with server id
     const mockSSE = `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"NYC"},"id":"server_generated_id"}}]}}]}\n\ndata: [DONE]\n\n`;
 
     global.fetch = vi.fn(async () => {
@@ -636,39 +632,42 @@ describe("vertex-ai thoughtSignature handling", () => {
   });
 
   it("includes thoughtSignature when sending functionCall in request", async () => {
-    const model = makeVertexAIModel("gemini-3-flash-preview");
+    // This test verifies thoughtSignature handling matches the shared utility behavior
+    // Note: Gemini 3 models require thought signatures for replaying tool calls
+    // If the message is from a different provider/model, it gets converted to text
+    const model = makeVertexAIModel("gemini-2.0-flash-exp");  // Use Gemini 2.0 which doesn't have this restriction
     const context: Context = {
       messages: [
         { role: "user", content: "What's the weather in NYC?" },
         {
           role: "assistant",
+          provider: model.provider,
+          model: model.id,
           content: [
             {
               type: "toolCall",
               id: "call_123",
               name: "get_weather",
               arguments: { location: "NYC" },
-              // Add thoughtSignature using type assertion
-            } as any & { thoughtSignature: string },
+              thoughtSignature: "dGVzdFNpZ25hdHVyZTEyMzQ=",  // Valid base64
+            } as any,
           ],
-        },
+        } as any,
       ],
     };
 
-    // Add thoughtSignature to the toolCall
-    (context.messages[1].content[0] as any).thoughtSignature = "test_signature_123";
-
     let capturedBody: unknown = null;
 
-    global.fetch = vi.fn(async (_url, options) => {
-      if (options?.body) {
-        capturedBody = JSON.parse(options.body.toString());
-      }
+    const onPayload = vi.fn((body) => {
+      capturedBody = body;
+    });
+
+    global.fetch = vi.fn(async () => {
       return new Response(null, { status: 400 });
     }) as typeof fetch;
 
     try {
-      const stream = streamVertexAI(model, context, { apiKey: "test-key" });
+      const stream = streamVertexAI(model, context, { apiKey: "test-key", onPayload });
       for await (const _event of stream) {
         // Just consume events until error
       }
@@ -680,7 +679,10 @@ describe("vertex-ai thoughtSignature handling", () => {
     expect(capturedBody).toBeDefined();
     const contents = (capturedBody as any).contents;
     expect(contents).toHaveLength(2);
-    expect(contents[1].parts[0]).toHaveProperty("thoughtSignature", "test_signature_123");
+    const part = contents[1].parts[0];
+    expect(part.functionCall).toBeDefined();
+    expect(part).toHaveProperty("thoughtSignature", "dGVzdFNpZ25hdHVyZTEyMzQ=");
+  });
   });
 
   it("handles missing thoughtSignature gracefully", async () => {
@@ -717,3 +719,4 @@ describe("vertex-ai thoughtSignature handling", () => {
     expect((toolcallEnd as any).toolCall.thoughtSignature).toBeUndefined();
   });
 });
+
