@@ -81,19 +81,12 @@ function convertMessagesToGoogleFormat(context: Context): Content[] {
             );
           }
 
-          const part: Part = {
+          parts.push({
             functionCall: {
               name: block.name,
               args: argsWithMarker,
             },
-          };
-
-          // Include thoughtSignature if present
-          if ((block as any).thoughtSignature) {
-            part.thoughtSignature = (block as any).thoughtSignature;
-          }
-
-          parts.push(part);
+          });
         }
       }
       if (parts.length > 0) {
@@ -351,12 +344,11 @@ export const streamVertexAI: StreamFunction<"vertex-ai", VertexAIOptions> = (
               const cleanArgs = { ...args };
               delete cleanArgs.__openclaw_tool_call_id;
 
-              const toolCall: ToolCall & { thoughtSignature?: string } = {
+              const toolCall: ToolCall = {
                 type: "toolCall",
                 id: toolCallId,
                 name: part.functionCall.name,
                 arguments: cleanArgs,
-                thoughtSignature: part.thoughtSignature,
               };
               output.content.push(toolCall);
               stream.push({
